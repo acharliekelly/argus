@@ -1,0 +1,80 @@
+services:
+  wordpress:
+    image: wordpress:7.0
+    container_name: wordpress
+    ports:
+      - "8093:80"
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wp_user
+      WORDPRESS_DB_PASSWORD: wp_password
+      WORDPRESS_DB_NAME: wp_database
+    volumes:
+      - wp_data:/var/www/html
+      - ./.argus:/argus
+    depends_on:
+      db:
+        condition: service_healthy
+      fixture-installer:
+        condition: service_completed_successfully
+
+  db:
+    image: mysql:5.7
+    container_name: db
+    restart: always
+    environment:
+      MYSQL_DATABASE: wp_database
+      MYSQL_USER: wp_user
+      MYSQL_PASSWORD: wp_password
+      MYSQL_ROOT_PASSWORD: root_password
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-proot_password"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  wpcli:
+    image: wordpress:cli
+    profiles: ["tools"]
+    user: "0:0"
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wp_user
+      WORDPRESS_DB_PASSWORD: wp_password
+      WORDPRESS_DB_NAME: wp_database
+    volumes:
+      - wp_data:/var/www/html
+      - ./.argus:/argus
+    working_dir: /var/www/html
+    depends_on:
+      db:
+        condition: service_healthy
+
+  fixture-installer:
+    image: alpine:3.22
+    volumes:
+      - wp_data:/var/www/html
+      - ./fixtures/argus-demo/v1:/fixture:ro
+    command:
+      - sh
+      - -lc
+      - rm -rf /var/www/html/wp-content/plugins/argus-demo && mkdir -p /var/www/html/wp-content/plugins/argus-demo && cp -R /fixture/. /var/www/html/wp-content/plugins/argus-demo/
+
+  fixture-server:
+    image: python:3.13-alpine
+    working_dir: /srv
+    command: ["python", "server.py"]
+    volumes:
+      - ./fixtures/argus-demo:/srv:ro
+    expose:
+      - "8080"
+    networks:
+      default:
+        aliases:
+          - fixture.argus.test
+
+volumes:
+  wp_data:
+  db_data:
