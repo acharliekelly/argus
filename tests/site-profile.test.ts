@@ -142,6 +142,18 @@ describe('siteProfileSchema', () => {
     }
   );
 
+  it.each(['/\n/example.com', '/\r/example.com', '/\t/example.com'])(
+    'rejects scenario path that URL parsing resolves to another origin: %j',
+    (path) => {
+      expect(() =>
+        siteProfileSchema.parse({
+          ...profileInput,
+          scenarios: [{ name: 'external', path }]
+        })
+      ).toThrow(/same origin/i);
+    }
+  );
+
   it('rejects credentials and unknown fields at every profile level', () => {
     expect(() =>
       siteProfileSchema.parse({ ...profileInput, credentials: { password: 'secret' } })

@@ -69,7 +69,19 @@ export const siteProfileSchema = z
       })
       .default(defaultViewports)
   })
-  .strict();
+  .strict()
+  .superRefine((profile, context) => {
+    const baseOrigin = new URL(profile.baseUrl).origin;
+    for (const [index, scenario] of profile.scenarios.entries()) {
+      if (new URL(scenario.path, profile.baseUrl).origin !== baseOrigin) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Scenario path must resolve to the same origin as baseUrl',
+          path: ['scenarios', index, 'path']
+        });
+      }
+    }
+  });
 
 export type SiteProfile = z.output<typeof siteProfileSchema>;
 export type SiteProfileInput = z.input<typeof siteProfileSchema>;
