@@ -1,10 +1,12 @@
 import { z } from 'zod';
 import { SITE_NAME_PATTERN } from './paths.js';
 
+export const DECLARATIVE_KEY_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
 export const declarativeScenarioSchema = z
   .object({
-    name: z.string().min(1),
-    path: z.string().startsWith('/'),
+    name: z.string().regex(DECLARATIVE_KEY_PATTERN),
+    path: z.string().regex(/^\/(?![\\/])/),
     mask: z.array(z.string().min(1)).default([]),
     visualThreshold: z.number().min(0).max(1).default(0.01),
     visibleSelectors: z.array(z.string().min(1)).default(['body'])
@@ -13,7 +15,7 @@ export const declarativeScenarioSchema = z
 
 export const viewportSchema = z
   .object({
-    name: z.string().min(1),
+    name: z.string().regex(DECLARATIVE_KEY_PATTERN),
     width: z.number().int().positive(),
     height: z.number().int().positive()
   })

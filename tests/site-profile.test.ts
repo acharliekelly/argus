@@ -130,6 +130,18 @@ describe('siteProfileSchema', () => {
     ).toThrow();
   });
 
+  it.each(['//example.com', '/\\example.com'])(
+    'rejects non-relative scenario path %s',
+    (path) => {
+      expect(() =>
+        siteProfileSchema.parse({
+          ...profileInput,
+          scenarios: [{ name: 'external', path }]
+        })
+      ).toThrow();
+    }
+  );
+
   it('rejects credentials and unknown fields at every profile level', () => {
     expect(() =>
       siteProfileSchema.parse({ ...profileInput, credentials: { password: 'secret' } })
@@ -180,6 +192,54 @@ describe('siteProfileSchema', () => {
         ]
       })
     ).toThrow(/duplicate viewport name/i);
+  });
+
+  it('rejects scenario names that collide after BrowserRunner normalization', () => {
+    expect(() =>
+      siteProfileSchema.parse({
+        ...profileInput,
+        scenarios: [
+          { name: 'Home Page', path: '/' },
+          { name: 'home-page', path: '/again' }
+        ]
+      })
+    ).toThrow();
+  });
+
+  it('rejects viewport names that collide after BrowserRunner normalization', () => {
+    expect(() =>
+      siteProfileSchema.parse({
+        ...profileInput,
+        viewports: [
+          { name: 'Wide Screen', width: 1440, height: 1000 },
+          { name: 'wide-screen', width: 1024, height: 768 }
+        ]
+      })
+    ).toThrow();
+  });
+
+  it('rejects repeated-hyphen scenario keys that normalize to the same artifact key', () => {
+    expect(() =>
+      siteProfileSchema.parse({
+        ...profileInput,
+        scenarios: [
+          { name: 'home--page', path: '/' },
+          { name: 'home-page', path: '/again' }
+        ]
+      })
+    ).toThrow();
+  });
+
+  it('rejects trailing-hyphen viewport keys that normalize to the same artifact key', () => {
+    expect(() =>
+      siteProfileSchema.parse({
+        ...profileInput,
+        viewports: [
+          { name: 'wide-', width: 1440, height: 1000 },
+          { name: 'wide', width: 1024, height: 768 }
+        ]
+      })
+    ).toThrow();
   });
 });
 
