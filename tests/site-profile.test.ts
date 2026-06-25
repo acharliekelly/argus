@@ -1,4 +1,4 @@
-import { access, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -41,6 +41,29 @@ describe('resolveSitePaths', () => {
       profilePath: '/home/test/.config/argus/sites/melrose.json',
       dataRoot: '/home/test/.local/share/argus/sites/melrose'
     });
+  });
+
+  it('ignores relative XDG roots and falls back to HOME', () => {
+    expect(
+      resolveSitePaths('melrose', {
+        XDG_CONFIG_HOME: 'relative-config',
+        XDG_DATA_HOME: 'relative-data',
+        HOME: '/home/test'
+      })
+    ).toEqual({
+      profilePath: '/home/test/.config/argus/sites/melrose.json',
+      dataRoot: '/home/test/.local/share/argus/sites/melrose'
+    });
+  });
+
+  it('rejects environments without absolute config and data roots', () => {
+    expect(() =>
+      resolveSitePaths('melrose', {
+        XDG_CONFIG_HOME: 'relative-config',
+        XDG_DATA_HOME: 'relative-data',
+        HOME: 'relative-home'
+      })
+    ).toThrow(/absolute.*config.*data/i);
   });
 
   it.each(['../escape', 'nested/site', '/absolute', 'Uppercase', '-leading'])(
@@ -134,6 +157,30 @@ describe('siteProfileSchema', () => {
       })
     ).toThrow();
   });
+
+  it('rejects duplicate scenario names', () => {
+    expect(() =>
+      siteProfileSchema.parse({
+        ...profileInput,
+        scenarios: [
+          { name: 'homepage', path: '/' },
+          { name: 'homepage', path: '/again' }
+        ]
+      })
+    ).toThrow(/duplicate scenario name/i);
+  });
+
+  it('rejects duplicate viewport names', () => {
+    expect(() =>
+      siteProfileSchema.parse({
+        ...profileInput,
+        viewports: [
+          { name: 'desktop', width: 1440, height: 1000 },
+          { name: 'desktop', width: 1024, height: 768 }
+        ]
+      })
+    ).toThrow(/duplicate viewport name/i);
+  });
 });
 
 describe('SiteStore', () => {
@@ -153,10 +200,12 @@ describe('SiteStore', () => {
     const home = await mkdtemp(join(tmpdir(), 'argus-site-store-'));
     const store = new SiteStore({ HOME: home });
     await store.save(profileInput);
+    const profileDirectory = join(home, '.config', 'argus', 'sites');
 
     await expect(
       store.save({ ...profileInput, baseUrl: 'http://localhost:8091' })
     ).rejects.toThrow(/already exists/i);
+    await expect(readdir(profileDirectory)).resolves.toEqual(['melrose.json']);
 
     await expect(
       store.save({ ...profileInput, baseUrl: 'http://localhost:8091' }, true)
@@ -164,6 +213,38 @@ describe('SiteStore', () => {
     await expect(store.load('melrose')).resolves.toMatchObject({
       baseUrl: 'http://localhost:8091'
     });
+    await expect(readdir(profileDirectory)).resolves.toEqual(['melrose.json']);
+  });
+
+  it('allows exactly one concurrent non-force save and cleans unique temp files', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'argus-site-store-'));
+    const store = new SiteStore({ HOME: home });
+    const firstProfile = { ...profileInput, baseUrl: 'http://localhost:8091' };
+    const secondProfile = { ...profileInput, baseUrl: 'http://localhost:8092' };
+
+    const results = await Promise.allSettled([
+      store.save(firstProfile),
+      store.save(secondProfile)
+    ]);
+
+    const fulfilled = results.filter(
+      (result): result is PromiseFulfilledResult<Awaited<ReturnType<SiteStore['save']>>> =>
+        result.status === 'fulfilled'
+    );
+    const rejected = results.filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected'
+    );
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.reason).toBeInstanceOf(Error);
+    expect((rejected[0]?.reason as Error).message).toMatch(/already exists/i);
+
+    const saved = await store.load('melrose');
+    expect(saved).toEqual(fulfilled[0]?.value);
+    expect([firstProfile.baseUrl, secondProfile.baseUrl]).toContain(saved.baseUrl);
+    await expect(readdir(join(home, '.config', 'argus', 'sites'))).resolves.toEqual([
+      'melrose.json'
+    ]);
   });
 
   it('validates profiles when saving and loading', async () => {

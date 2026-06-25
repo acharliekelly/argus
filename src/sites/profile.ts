@@ -52,10 +52,40 @@ export const siteProfileSchema = z
       })
       .strict(),
     networkName: z.string().min(1),
-    scenarios: z.array(declarativeScenarioSchema).min(1).default(defaultScenarios),
-    viewports: z.array(viewportSchema).min(1).default(defaultViewports)
+    scenarios: z
+      .array(declarativeScenarioSchema)
+      .min(1)
+      .superRefine((scenarios, context) => {
+        addDuplicateNameIssues(scenarios, 'scenario', context);
+      })
+      .default(defaultScenarios),
+    viewports: z
+      .array(viewportSchema)
+      .min(1)
+      .superRefine((viewports, context) => {
+        addDuplicateNameIssues(viewports, 'viewport', context);
+      })
+      .default(defaultViewports)
   })
   .strict();
 
 export type SiteProfile = z.output<typeof siteProfileSchema>;
 export type SiteProfileInput = z.input<typeof siteProfileSchema>;
+
+function addDuplicateNameIssues(
+  items: Array<{ name: string }>,
+  label: string,
+  context: z.RefinementCtx
+): void {
+  const names = new Set<string>();
+  for (const [index, item] of items.entries()) {
+    if (names.has(item.name)) {
+      context.addIssue({
+        code: 'custom',
+        message: `Duplicate ${label} name: ${item.name}`,
+        path: [index, 'name']
+      });
+    }
+    names.add(item.name);
+  }
+}

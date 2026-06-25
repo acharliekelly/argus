@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 
 export const SITE_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
 
@@ -19,15 +19,20 @@ export function resolveSitePaths(
 ): SitePaths {
   assertSiteName(name);
 
-  const home = environment.HOME;
-  const configRoot = environment.XDG_CONFIG_HOME || (home && join(home, '.config'));
-  const dataRoot = environment.XDG_DATA_HOME || (home && join(home, '.local', 'share'));
+  const home = absolutePath(environment.HOME);
+  const configRoot = absolutePath(environment.XDG_CONFIG_HOME) ?? (home && join(home, '.config'));
+  const dataRoot =
+    absolutePath(environment.XDG_DATA_HOME) ?? (home && join(home, '.local', 'share'));
   if (!configRoot || !dataRoot) {
-    throw new Error('HOME is required when XDG config or data directories are not set');
+    throw new Error('Absolute config and data roots are required');
   }
 
   return {
     profilePath: join(configRoot, 'argus', 'sites', `${name}.json`),
     dataRoot: join(dataRoot, 'argus', 'sites', name)
   };
+}
+
+function absolutePath(path: string | undefined): string | undefined {
+  return path && isAbsolute(path) ? path : undefined;
 }
