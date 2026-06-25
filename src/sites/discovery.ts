@@ -54,6 +54,7 @@ type InspectedContainer = {
   labels: Record<string, string>;
   mounts: Array<{
     type: string;
+    name?: string;
     source: string;
     destination: string;
   }>;
@@ -77,11 +78,22 @@ export async function discoverSite(
   }
 
   const composeResult = assertCommandPassed(
-    await runner.run('docker', ['compose', '-f', composeFile, 'ps', '--format', 'json']),
+    await runner.run('docker', [
+      'compose',
+      '-f',
+      composeFile,
+      'ps',
+      '--all',
+      '--format',
+      'json'
+    ]),
     'compose_ps'
   );
   const composeContainers = parseComposeOutput(composeResult.stdout);
-  const containerIds = composeContainers.map((container) => container.id).filter(Boolean);
+  rejectStoppedServiceOverride(composeContainers, input.wordpressService);
+
+  const runningContainers = composeContainers.filter(isRunning);
+  const containerIds = runningContainers.map((container) => container.id).filter(Boolean);
   const inspectedContainers =
     containerIds.length === 0
       ? []
@@ -91,12 +103,9 @@ export async function discoverSite(
             'docker_inspect'
           ).stdout
         );
-  const inspections = new Map(
-    inspectedContainers.map((container) => [container.id, container])
-  );
-  const containers = composeContainers
+  const containers = runningContainers
     .map((compose): Candidate | null => {
-      const inspect = inspections.get(compose.id);
+      const inspect = findInspection(compose, inspectedContainers);
       if (!inspect) {
         return null;
       }
@@ -107,7 +116,7 @@ export async function discoverSite(
     signalsWordPress(compose, inspect)
   );
 
-  const selected = selectCandidate(candidates, input.wordpressService);
+  const selected = selectCandidate(candidates, composeContainers, input.wordpressService);
   const projectName = requiredLabel(
     selected.inspect,
     'com.docker.compose.project',
@@ -181,8 +190,10 @@ function parseInspectOutput(output: string): InspectedContainer[] {
       labels,
       mounts: mounts.map((mount) => {
         const item = asRecord(mount, 'docker_inspect_invalid_json');
+        const name = optionalStringField(item, 'Name');
         return {
           type: stringField(item, 'Type'),
+          ...(name ? { name } : {}),
           source: stringField(item, 'Source'),
           destination: stringField(item, 'Destination')
         };
@@ -228,9 +239,7 @@ function signalsWordPress(
   compose: ComposeContainer,
   inspect: InspectedContainer
 ): boolean {
-  const imageSignalsWordPress = /(?:^|[/_-])wordpress(?=[:@/_-]|$)/i.test(
-    `${compose.image} ${inspect.image}`
-  );
+  const imageSignalsWordPress = signalsWordPressImage(`${compose.image} ${inspect.image}`);
   const environmentSignalsWordPress = Object.keys(inspect.environment).some((key) =>
     key.startsWith('WORDPRESS_')
   );
@@ -242,6 +251,7 @@ function signalsWordPress(
 
 function selectCandidate(
   candidates: Candidate[],
+  composeContainers: ComposeContainer[],
   wordpressService: string | undefined
 ): Candidate {
   const matchingService =
@@ -263,18 +273,36 @@ function selectCandidate(
     const services = running.map(candidateService).sort().join(', ');
     fail(
       'wordpress_service_ambiguous',
-      `Multiple running WordPress services matched: ${services}; provide wordpressService`
+      `Multiple running WordPress services matched: ${services}; select one with --wordpress-service`
     );
   }
-  if (wordpressService !== undefined || matchingService.length > 0) {
+  if (wordpressService !== undefined) {
+    const selectedIsRunning = composeContainers.some(
+      (container) => container.service === wordpressService && isRunning(container)
+    );
+    if (selectedIsRunning) {
+      fail(
+        'wordpress_service_not_found',
+        `Running service ${wordpressService} does not signal WordPress with its image or environment and /var/www/html mount; choose another service with --wordpress-service`
+      );
+    }
     fail(
       'wordpress_service_not_running',
-      `WordPress service ${wordpressService ?? candidateService(matchingService[0] as Candidate)} is not running`
+      `WordPress service ${wordpressService} is not running; choose a running service with --wordpress-service`
+    );
+  }
+  const stoppedWordPressServices = composeContainers
+    .filter((container) => !isRunning(container) && signalsWordPressImage(container.image))
+    .map((container) => container.service);
+  if (stoppedWordPressServices.length > 0) {
+    fail(
+      'wordpress_service_not_running',
+      `WordPress service ${stoppedWordPressServices.join(', ')} is not running; start it or choose a running service with --wordpress-service`
     );
   }
   fail(
     'wordpress_service_not_found',
-    'No running Compose service has a WordPress image or environment and a /var/www/html mount'
+    'No running Compose service has a WordPress image or environment and a /var/www/html mount; specify the service with --wordpress-service'
   );
 }
 
@@ -289,7 +317,7 @@ function discoverBaseUrl(container: ComposeContainer): string {
   if (ports.length !== 1) {
     fail(
       'base_url_ambiguous',
-      'Expected one published host port for container port 80; provide baseUrl'
+      'Expected one published host port for container port 80; provide the site address with --url'
     );
   }
   return `http://localhost:${String(ports[0])}`;
@@ -312,7 +340,7 @@ function discoverWordPressMount(
   }
   return {
     type: mount.type,
-    source: mount.source,
+    source: mount.type === 'volume' ? requiredMountName(mount) : mount.source,
     destination: WORDPRESS_ROOT
   };
 }
@@ -371,6 +399,56 @@ function candidateService(candidate: Candidate): string {
   return candidate.inspect.labels['com.docker.compose.service'] ?? candidate.compose.service;
 }
 
+function rejectStoppedServiceOverride(
+  containers: ComposeContainer[],
+  wordpressService: string | undefined
+): void {
+  if (wordpressService === undefined) {
+    return;
+  }
+  const selected = containers.filter((container) => container.service === wordpressService);
+  if (selected.length > 0 && selected.every((container) => !isRunning(container))) {
+    fail(
+      'wordpress_service_not_running',
+      `WordPress service ${wordpressService} is not running; start it or choose a running service with --wordpress-service`
+    );
+  }
+}
+
+function findInspection(
+  compose: ComposeContainer,
+  inspections: InspectedContainer[]
+): InspectedContainer | undefined {
+  const byId = inspections.find(
+    (inspect) => inspect.id.startsWith(compose.id) || compose.id.startsWith(inspect.id)
+  );
+  if (byId) {
+    return byId;
+  }
+  const byService = inspections.filter(
+    (inspect) => inspect.labels['com.docker.compose.service'] === compose.service
+  );
+  return byService.length === 1 ? byService[0] : undefined;
+}
+
+function isRunning(container: ComposeContainer): boolean {
+  return container.state.toLowerCase() === 'running';
+}
+
+function signalsWordPressImage(image: string): boolean {
+  return /(?:^|[/_-])wordpress(?=[:@/_-]|$)/i.test(image);
+}
+
+function requiredMountName(mount: InspectedContainer['mounts'][number]): string {
+  if (!mount.name) {
+    fail(
+      'unsupported_wordpress_mount',
+      'The /var/www/html named volume is missing its Docker mount name'
+    );
+  }
+  return mount.name;
+}
+
 function requiredLabel(
   container: InspectedContainer,
   label: string,
@@ -403,6 +481,14 @@ function stringRecord(value: unknown, reasonCode: string): Record<string, string
 function stringField(record: Record<string, unknown>, field: string): string {
   const value = record[field];
   return typeof value === 'string' ? value : '';
+}
+
+function optionalStringField(
+  record: Record<string, unknown>,
+  field: string
+): string | undefined {
+  const value = record[field];
+  return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
 function numberField(

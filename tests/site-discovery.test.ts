@@ -20,7 +20,7 @@ type InspectRow = {
     Env?: string[];
     Labels: Record<string, string>;
   };
-  Mounts: Array<{ Type: string; Source: string; Destination: string }>;
+  Mounts: Array<{ Type: string; Name?: string; Source: string; Destination: string }>;
   NetworkSettings: { Networks: Record<string, object> };
 };
 
@@ -36,11 +36,16 @@ beforeEach(async () => {
 describe('discoverSite', () => {
   it('discovers one running WordPress service from array JSON and restricts its environment', async () => {
     const rows = [
-      composeRow('wordpress-id', 'wordpress', 'wordpress', 'running', 8090),
-      composeRow('database-id', 'mariadb:11', 'db', 'running')
+      composeRow('0379de83ab5e', 'wordpress:7.0', 'wordpress', 'running', 8090),
+      composeRow('31132589c269', 'mysql:5.7', 'db', 'running'),
+      composeRow('c69149a4f1a3', 'alpine:3.22', 'fixture-installer', 'exited')
+    ];
+    rows[0]!.Publishers = [
+      { TargetPort: 80, PublishedPort: 8090, Protocol: 'tcp' },
+      { TargetPort: 80, PublishedPort: 8090, Protocol: 'tcp' }
     ];
     const inspections = [
-      inspectRow('wordpress-id', {
+      inspectRow('0379de83ab5e87a796edfa92bca00cb155d23fe70e3989cef73fc6b3a24aa111', {
         environment: [
           'WORDPRESS_DB_HOST=db:3306',
           'WORDPRESS_DB_NAME=wordpress',
@@ -49,9 +54,19 @@ describe('discoverSite', () => {
           'UNRELATED=value'
         ],
         networks: ['project_default', 'proxy'],
-        mount: { Type: 'volume', Source: 'project_wordpress', Destination: '/var/www/html' }
+        mount: {
+          Type: 'volume',
+          Name: 'project_wordpress',
+          Source: '/var/lib/docker/volumes/project_wordpress/_data',
+          Destination: '/var/www/html'
+        }
       }),
-      inspectRow('database-id', { image: 'mariadb:11', networks: ['project_default'] })
+      inspectRow('31132589c269790a12e124386ba339622aac2f45de2e14b78e18cfb835e454ac', {
+        image: 'mysql:5.7',
+        service: 'db',
+        mount: null,
+        networks: ['project_default']
+      })
     ];
     const runner = fakeRunner(JSON.stringify(rows), inspections);
 
@@ -60,7 +75,7 @@ describe('discoverSite', () => {
       projectDirectory: directory,
       projectName: 'project',
       wordpressService: 'wordpress',
-      containerId: 'wordpress-id',
+      containerId: '0379de83ab5e87a796edfa92bca00cb155d23fe70e3989cef73fc6b3a24aa111',
       baseUrl: 'http://localhost:8090',
       networkName: 'project_default',
       wordpressMount: {
@@ -80,13 +95,14 @@ describe('discoverSite', () => {
       '-f',
       composeFile,
       'ps',
+      '--all',
       '--format',
       'json'
     ]);
     expect(runner.run).toHaveBeenNthCalledWith(2, 'docker', [
       'inspect',
-      'wordpress-id',
-      'database-id'
+      '0379de83ab5e',
+      '31132589c269'
     ]);
   });
 
@@ -179,17 +195,46 @@ describe('discoverSite', () => {
     );
 
     await expect(discoverSite({ composeFile }, runner)).rejects.toThrow(
-      /^wordpress_service_ambiguous:.*first.*second/
+      /^wordpress_service_ambiguous:.*first.*second.*--wordpress-service/
     );
   });
 
-  it('reports a requested WordPress service that is not running', async () => {
+  it('reports a requested stopped WordPress service without inspecting it', async () => {
     const rows = [composeRow('wordpress-id', 'wordpress:latest', 'wordpress', 'exited', 8090)];
-    const runner = fakeRunner(JSON.stringify(rows), [inspectRow('wordpress-id')]);
+    const runner = fakeRunner(JSON.stringify(rows), []);
 
     await expect(
       discoverSite({ composeFile, wordpressService: 'wordpress' }, runner)
-    ).rejects.toThrow(/^wordpress_service_not_running:/);
+    ).rejects.toThrow(/^wordpress_service_not_running:.*--wordpress-service/);
+    expect(runner.run).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports an auto-detected stopped WordPress candidate as not running', async () => {
+    const rows = [
+      composeRow('wordpress-id', 'wordpress:latest', 'wordpress', 'exited', 8090),
+      composeRow('database-id', 'mysql:8', 'db', 'running')
+    ];
+    const runner = fakeRunner(
+      JSON.stringify(rows),
+      [inspectRow('database-id', { image: 'mysql:8', service: 'db', mount: null })]
+    );
+
+    await expect(discoverSite({ composeFile }, runner)).rejects.toThrow(
+      /^wordpress_service_not_running:.*wordpress.*--wordpress-service/
+    );
+    expect(runner.run).toHaveBeenNthCalledWith(2, 'docker', ['inspect', 'database-id']);
+  });
+
+  it('reports a running selected service that does not signal WordPress as not found', async () => {
+    const rows = [composeRow('database-id', 'mysql:8', 'db', 'running')];
+    const runner = fakeRunner(
+      JSON.stringify(rows),
+      [inspectRow('database-id', { image: 'mysql:8', service: 'db', mount: null })]
+    );
+
+    await expect(
+      discoverSite({ composeFile, wordpressService: 'db' }, runner)
+    ).rejects.toThrow(/^wordpress_service_not_found:.*db.*--wordpress-service/);
   });
 
   it('reports when no running service looks like WordPress', async () => {
@@ -200,7 +245,7 @@ describe('discoverSite', () => {
     );
 
     await expect(discoverSite({ composeFile }, runner)).rejects.toThrow(
-      /^wordpress_service_not_found:/
+      /^wordpress_service_not_found:.*--wordpress-service/
     );
   });
 
@@ -213,7 +258,7 @@ describe('discoverSite', () => {
     const runner = fakeRunner(JSON.stringify([row]), [inspectRow('wordpress-id')]);
 
     await expect(discoverSite({ composeFile }, runner)).rejects.toThrow(
-      /^base_url_ambiguous:/
+      /^base_url_ambiguous:.*--url/
     );
   });
 
@@ -298,7 +343,7 @@ function inspectRow(
     image?: string;
     environment?: string[];
     networks?: string[];
-    mount?: { Type: string; Source: string; Destination: string } | null;
+    mount?: { Type: string; Name?: string; Source: string; Destination: string } | null;
     project?: string;
     service?: string;
   } = {}
@@ -320,7 +365,8 @@ function inspectRow(
         : [
             options.mount ?? {
               Type: 'volume',
-              Source: 'project_wordpress',
+              Name: 'project_wordpress',
+              Source: '/var/lib/docker/volumes/project_wordpress/_data',
               Destination: '/var/www/html'
             }
           ],
