@@ -23,6 +23,7 @@ export type ConnectSiteDependencies = {
     containerId: string;
     networkName: string;
     wordpressEnvironment: Record<string, string>;
+    helperImage?: string;
   }): Pick<DockerSiteHelper, 'runWp'>;
   fetch(url: string): Promise<{ ok: boolean; status: number }>;
   store: SiteStore;
@@ -52,7 +53,8 @@ export async function connectSite(
   const helper = dependencies.createHelper({
     containerId: discovered.containerId,
     networkName: discovered.networkName,
-    wordpressEnvironment: discovered.wordpressEnvironment
+    wordpressEnvironment: discovered.wordpressEnvironment,
+    ...(input.helperImage === undefined ? {} : { helperImage: input.helperImage })
   });
 
   assertCommandPassed(await helper.runWp(['core', 'is-installed']), 'wp_core_is_installed');

@@ -2,18 +2,18 @@ import { copyFile, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { assertCommandPassed, ProcessRunner, type ProcessRunnerLike } from '../process.js';
-import { connectSite as defaultConnectSite, type ConnectSiteInput, type ConnectSiteResult } from './connect.js';
+import { connectSite as defaultConnectSite, type ConnectSiteInput } from './connect.js';
 import { siteProfileSchema, type SiteProfile } from './profile.js';
 import { SiteStore } from './store.js';
 
 export type ConnectSiteCommandInput = ConnectSiteInput;
 
 export type SiteCommandDependencies = {
-  connectSite(input: ConnectSiteCommandInput): Promise<ConnectSiteResult>;
+  connectSite: typeof defaultConnectSite;
   store: SiteStore;
   process: Pick<ProcessRunnerLike, 'run'>;
   environment: NodeJS.ProcessEnv;
-  validateConnectivity(profile: SiteProfile): Promise<void>;
+  validateConnectivity(profile: SiteProfile): Promise<SiteProfile | void>;
 };
 
 export async function connectSiteCommand(
@@ -62,7 +62,10 @@ export async function editSiteCommand(
   const environment = dependencies.environment ?? process.env;
   const editor = selectEditor(environment);
   const processRunner = dependencies.process ?? new ProcessRunner();
-  const validateConnectivity = dependencies.validateConnectivity ?? defaultValidateConnectivity;
+  const connectSite = dependencies.connectSite ?? defaultConnectSite;
+  const validateConnectivity =
+    dependencies.validateConnectivity ??
+    ((profile: SiteProfile) => defaultValidateConnectivity(profile, connectSite));
   const paths = store.paths(name);
   const temporaryDirectory = await mkdtemp(join(tmpdir(), 'argus-site-edit-'));
   const temporaryProfilePath = join(temporaryDirectory, `${name}.json`);
@@ -73,10 +76,14 @@ export async function editSiteCommand(
     assertCommandPassed(
       await processRunner.run('/bin/sh', [
         '-c',
-        'exec "$0" "$1"',
-        editor,
-        temporaryProfilePath
-      ]),
+        'eval "set -- $ARGUS_EDITOR"; exec "$@" "$ARGUS_PROFILE"'
+      ], {
+        env: {
+          ...environment,
+          ARGUS_EDITOR: editor,
+          ARGUS_PROFILE: temporaryProfilePath
+        }
+      }),
       'site_profile_editor'
     );
 
@@ -87,7 +94,10 @@ export async function editSiteCommand(
       throw new Error(`Edited profile name must remain ${name}`);
     }
 
-    await validateConnectivity(editedProfile);
+    const validatedProfile = await validateConnectivity(editedProfile);
+    if (validatedProfile !== undefined) {
+      assertDiscoveredFieldsMatch(editedProfile, validatedProfile);
+    }
     await store.save(editedProfile, true);
     return `Updated site: ${name}`;
   } finally {
@@ -115,10 +125,13 @@ function selectEditor(environment: NodeJS.ProcessEnv): string {
   throw new Error('Set VISUAL or EDITOR to edit site profiles');
 }
 
-async function defaultValidateConnectivity(profile: SiteProfile): Promise<void> {
+async function defaultValidateConnectivity(
+  profile: SiteProfile,
+  connectSite: SiteCommandDependencies['connectSite']
+): Promise<SiteProfile> {
   const temporaryHome = await mkdtemp(join(tmpdir(), 'argus-site-validation-'));
   try {
-    await defaultConnectSite(
+    const result = await connectSite(
       {
         name: profile.name,
         composeFile: profile.composeFile,
@@ -129,7 +142,20 @@ async function defaultValidateConnectivity(profile: SiteProfile): Promise<void> 
       },
       { store: new SiteStore({ HOME: temporaryHome }) }
     );
+    return result.profile;
   } finally {
     await rm(temporaryHome, { recursive: true, force: true });
+  }
+}
+
+function assertDiscoveredFieldsMatch(editedProfile: SiteProfile, validatedProfile: SiteProfile): void {
+  if (editedProfile.networkName !== validatedProfile.networkName) {
+    throw new Error(
+      `Edited profile networkName ${editedProfile.networkName} does not match discovered networkName ${validatedProfile.networkName}`
+    );
+  }
+
+  if (JSON.stringify(editedProfile.wordpressMount) !== JSON.stringify(validatedProfile.wordpressMount)) {
+    throw new Error('Edited profile wordpressMount does not match the discovered WordPress mount');
   }
 }

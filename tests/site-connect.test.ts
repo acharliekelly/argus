@@ -140,6 +140,29 @@ describe('connectSite', () => {
     await expect(store.load('wp-melroseuu')).rejects.toThrow();
   });
 
+  it('passes a requested helper image into the helper used for validation', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'argus-site-connect-'));
+    const store = new SiteStore({ HOME: home });
+    const createHelper = vi.fn<ConnectSiteDependencies['createHelper']>().mockReturnValue(fakeHelper());
+
+    await connectSite(
+      {
+        name: 'wp-melroseuu',
+        composeFile: '/site/docker-compose.yml',
+        helperImage: 'wordpress:cli-php8.3',
+        force: false
+      },
+      dependenciesFor({ store, createHelper })
+    );
+
+    expect(createHelper).toHaveBeenCalledWith({
+      containerId: 'runtime-container-id',
+      networkName: 'site_default',
+      wordpressEnvironment: discoveredSite.wordpressEnvironment,
+      helperImage: 'wordpress:cli-php8.3'
+    });
+  });
+
   it('honors force when overwriting an existing profile', async () => {
     const home = await mkdtemp(join(tmpdir(), 'argus-site-connect-'));
     const store = new SiteStore({ HOME: home });

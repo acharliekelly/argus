@@ -13,6 +13,7 @@ import { connectSite, type ConnectSiteDependencies, type ConnectSiteResult } fro
 import type { DiscoveredSite } from '../src/sites/discovery.js';
 import type { SiteProfile } from '../src/sites/profile.js';
 import { SiteStore } from '../src/sites/store.js';
+import type { RunOptions } from '../src/process.js';
 import type { CommandRecord } from '../src/types.js';
 
 const baseProfile: SiteProfile = {
@@ -136,8 +137,8 @@ describe('site command handlers', () => {
   it('edits a copied profile with VISUAL, validates connectivity, and atomically saves on success', async () => {
     const store = await tempStore();
     await store.save(baseProfile);
-    const process = fakeProcess(async (_command, _args) => {
-      const tempPath = _args[3];
+    const process = fakeProcess(async (_command, _args, options) => {
+      const tempPath = temporaryProfilePath(_args, options);
       if (tempPath === undefined) {
         throw new Error('missing temp path');
       }
@@ -154,12 +155,16 @@ describe('site command handlers', () => {
       validateConnectivity
     });
 
-    expect(process.run).toHaveBeenCalledWith('/bin/sh', [
-      '-c',
-      'exec "$0" "$1"',
-      'nano',
-      expect.stringContaining('wp-melroseuu')
-    ]);
+    expect(process.run).toHaveBeenCalledWith(
+      '/bin/sh',
+      ['-c', 'eval "set -- $ARGUS_EDITOR"; exec "$@" "$ARGUS_PROFILE"'],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          ARGUS_EDITOR: 'nano',
+          ARGUS_PROFILE: expect.stringContaining('wp-melroseuu')
+        })
+      })
+    );
     expect(validateConnectivity).toHaveBeenCalledWith({
       ...baseProfile,
       baseUrl: 'http://localhost:8091'
@@ -183,12 +188,16 @@ describe('site command handlers', () => {
         validateConnectivity: vi.fn().mockResolvedValue(undefined)
       })
     ).resolves.toBe('Updated site: wp-melroseuu');
-    expect(process.run).toHaveBeenCalledWith('/bin/sh', [
-      '-c',
-      'exec "$0" "$1"',
-      'vim',
-      expect.any(String)
-    ]);
+    expect(process.run).toHaveBeenCalledWith(
+      '/bin/sh',
+      ['-c', 'eval "set -- $ARGUS_EDITOR"; exec "$@" "$ARGUS_PROFILE"'],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          ARGUS_EDITOR: 'vim',
+          ARGUS_PROFILE: expect.any(String)
+        })
+      })
+    );
 
     await expect(
       editSiteCommand('wp-melroseuu', {
@@ -203,8 +212,8 @@ describe('site command handlers', () => {
   it('preserves the original profile when edited JSON fails schema validation', async () => {
     const store = await tempStore();
     await store.save(baseProfile);
-    const process = fakeProcess(async (command, args) => {
-      const tempPath = args[3];
+    const process = fakeProcess(async (command, args, options) => {
+      const tempPath = temporaryProfilePath(args, options);
       if (tempPath === undefined) {
         throw new Error('missing temp path');
       }
@@ -229,8 +238,8 @@ describe('site command handlers', () => {
   it('preserves the original profile when live validation fails after editing', async () => {
     const store = await tempStore();
     await store.save(baseProfile);
-    const process = fakeProcess(async (command, args) => {
-      const tempPath = args[3];
+    const process = fakeProcess(async (command, args, options) => {
+      const tempPath = temporaryProfilePath(args, options);
       if (tempPath === undefined) {
         throw new Error('missing temp path');
       }
@@ -251,6 +260,70 @@ describe('site command handlers', () => {
     ).rejects.toThrow('site_url_fetch failed');
 
     await expect(store.load('wp-melroseuu')).resolves.toEqual(baseProfile);
+  });
+
+  it('rejects edits when live validation discovers a different network name', async () => {
+    const store = await tempStore();
+    await store.save(baseProfile);
+    const editedProfile = { ...baseProfile, networkName: 'schema-valid-but-wrong' };
+    const process = fakeProcess(async (command, args, options) => {
+      const tempPath = temporaryProfilePath(args, options);
+      if (tempPath === undefined) {
+        throw new Error('missing temp path');
+      }
+      await writeFile(tempPath, `${JSON.stringify(editedProfile, null, 2)}\n`);
+      return commandRecord(command, args);
+    });
+
+    await expect(
+      editSiteCommand('wp-melroseuu', {
+        store,
+        process,
+        environment: { EDITOR: 'vim' },
+        validateConnectivity: vi.fn().mockResolvedValue(baseProfile)
+      })
+    ).rejects.toThrow(/networkName/i);
+
+    await expect(store.load('wp-melroseuu')).resolves.toEqual(baseProfile);
+  });
+
+  it('passes editor arguments while keeping the temporary profile path separate', async () => {
+    const store = await tempStore();
+    await store.save(baseProfile);
+    const process = fakeProcess(async (command, args, options) => {
+      const tempPath = options?.env?.ARGUS_PROFILE;
+      if (tempPath === undefined) {
+        throw new Error('missing temp path');
+      }
+      await writeFile(
+        tempPath,
+        `${JSON.stringify({ ...baseProfile, baseUrl: 'http://localhost:8092' }, null, 2)}\n`
+      );
+      return commandRecord(command, args);
+    });
+
+    await expect(
+      editSiteCommand('wp-melroseuu', {
+        store,
+        process,
+        environment: { VISUAL: 'code --wait', EDITOR: 'vim' },
+        validateConnectivity: vi.fn().mockResolvedValue(baseProfile)
+      })
+    ).resolves.toBe('Updated site: wp-melroseuu');
+
+    expect(process.run).toHaveBeenCalledWith(
+      '/bin/sh',
+      ['-c', 'eval "set -- $ARGUS_EDITOR"; exec "$@" "$ARGUS_PROFILE"'],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          ARGUS_EDITOR: 'code --wait',
+          ARGUS_PROFILE: expect.stringContaining('wp-melroseuu')
+        })
+      })
+    );
+    await expect(store.load('wp-melroseuu')).resolves.toMatchObject({
+      baseUrl: 'http://localhost:8092'
+    });
   });
 });
 
@@ -276,8 +349,14 @@ async function tempStore(): Promise<SiteStore> {
 }
 
 function fakeProcess(
-  run: (command: string, args: string[]) => Promise<CommandRecord>
-): { run: ReturnType<typeof vi.fn<(command: string, args: string[]) => Promise<CommandRecord>>> } {
+  run: (command: string, args: string[], options?: RunOptions) => Promise<CommandRecord>
+): {
+  run: ReturnType<
+    typeof vi.fn<
+      (command: string, args: string[], options?: RunOptions) => Promise<CommandRecord>
+    >
+  >;
+} {
   return {
     run: vi.fn(run)
   };
@@ -292,6 +371,10 @@ function commandRecord(command: string, args: string[]): CommandRecord {
     exitCode: 0,
     durationMs: 1
   };
+}
+
+function temporaryProfilePath(args: string[], options?: RunOptions): string | undefined {
+  return options?.env?.ARGUS_PROFILE ?? args[3];
 }
 
 function connectDependencies(store: SiteStore): ConnectSiteDependencies {
