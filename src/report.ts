@@ -1,16 +1,37 @@
 import { z } from 'zod';
-import type { CommandRecord, SiteInventory, UpdateTarget } from './types.js';
+import type { CommandRecord, SiteIdentity, SiteInventory, UpdateTarget } from './types.js';
 
-export const reportSchema = z.object({
-  schemaVersion: z.literal(1),
+const targetSchema = z.object({
+  type: z.enum(['plugin', 'theme', 'core']),
+  slug: z.string()
+});
+
+const snapshotSchema = z
+  .object({
+    databasePath: z.string(),
+    contentPath: z.string(),
+    createdAt: z.string()
+  })
+  .nullable();
+
+const rollbackSchema = z
+  .object({
+    completedAt: z.string(),
+    passed: z.boolean()
+  })
+  .nullable();
+
+const siteIdentitySchema = z.object({
+  name: z.string().min(1),
+  fingerprint: z.string().min(1)
+});
+
+const reportFields = {
   runId: z.string().min(1),
   startedAt: z.string(),
   completedAt: z.string().nullable(),
   status: z.enum(['running', 'passed', 'failed', 'aborted', 'rolled_back']),
-  target: z.object({
-    type: z.enum(['plugin', 'theme', 'core']),
-    slug: z.string()
-  }),
+  target: targetSchema,
   reasonCodes: z.array(z.string()),
   recommendation: z.enum(['accept', 'rollback', 'investigate']),
   inventory: z.object({
@@ -25,26 +46,34 @@ export const reportSchema = z.object({
     visual: z.array(z.unknown()),
     rollback: z.array(z.unknown())
   }),
-  snapshot: z
-    .object({
-      databasePath: z.string(),
-      contentPath: z.string(),
-      createdAt: z.string()
-    })
-    .nullable(),
-  rollback: z
-    .object({
-      completedAt: z.string(),
-      passed: z.boolean()
-    })
-    .nullable()
+  snapshot: snapshotSchema,
+  rollback: rollbackSchema
+};
+
+const legacyReportSchema = z.object({
+  schemaVersion: z.literal(1),
+  ...reportFields
 });
 
-export type ArgusReport = z.infer<typeof reportSchema>;
+const currentReportSchema = z.object({
+  schemaVersion: z.literal(2),
+  site: siteIdentitySchema.nullable(),
+  ...reportFields
+});
 
-export function createInitialReport(runId: string, target: UpdateTarget): ArgusReport {
+export const reportSchema = z.union([currentReportSchema, legacyReportSchema]);
+
+export type ArgusReport = z.infer<typeof reportSchema>;
+export type CurrentArgusReport = z.infer<typeof currentReportSchema>;
+
+export function createInitialReport(
+  runId: string,
+  target: UpdateTarget,
+  site: SiteIdentity | null = null
+): CurrentArgusReport {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    site,
     runId,
     startedAt: new Date().toISOString(),
     completedAt: null,

@@ -1,8 +1,8 @@
 import { access } from 'node:fs/promises';
 import { reportSchema, createInitialReport, deriveRecommendation, redactValue } from './report.js';
-import type { ArgusReport } from './report.js';
+import type { ArgusReport, CurrentArgusReport } from './report.js';
 import type { RunStore } from './run-store.js';
-import type { CommandRecord, SiteInventory, UpdateTarget } from './types.js';
+import type { CommandRecord, SiteIdentity, SiteInventory, UpdateTarget } from './types.js';
 import { assertUpdateEligible } from './wordpress/inventory.js';
 import type { PreflightCheck } from './wordpress/adapter.js';
 import type { SnapshotMetadata } from './wordpress/snapshot.js';
@@ -34,10 +34,15 @@ type OrchestratorDependencies = {
   store: RunStore;
 };
 
+type OrchestratorOptions = {
+  siteIdentity?: SiteIdentity | null;
+};
+
 export class MaintenanceOrchestrator {
   constructor(
     private readonly dependencies: OrchestratorDependencies,
-    private readonly secretValues: string[]
+    private readonly secretValues: string[],
+    private readonly options: OrchestratorOptions = {}
   ) {}
 
   private async persist(report: ArgusReport): Promise<void> {
@@ -46,8 +51,8 @@ export class MaintenanceOrchestrator {
     await this.dependencies.store.writeJson(report.runId, 'report.json', redacted);
   }
 
-  async update(target: UpdateTarget, runId: string): Promise<ArgusReport> {
-    const report = createInitialReport(runId, target);
+  async update(target: UpdateTarget, runId: string): Promise<CurrentArgusReport> {
+    const report = createInitialReport(runId, target, this.options.siteIdentity ?? null);
     await this.dependencies.store.createRun(runId);
     await this.persist(report);
 
@@ -110,8 +115,10 @@ export class MaintenanceOrchestrator {
   }
 
   async rollback(runId: string): Promise<ArgusReport> {
-    const report = await this.dependencies.store.readJson<ArgusReport>(runId, 'report.json');
-    reportSchema.parse(report);
+    const report = reportSchema.parse(
+      await this.dependencies.store.readJson<unknown>(runId, 'report.json')
+    );
+    assertRollbackSiteIdentity(report, this.options.siteIdentity ?? null);
     if (!report.snapshot) {
       throw new Error(`snapshot_missing: run ${runId} has no restorable snapshot`);
     }
@@ -133,10 +140,32 @@ export class MaintenanceOrchestrator {
     return this.finish(report);
   }
 
-  private async finish(report: ArgusReport): Promise<ArgusReport> {
+  private async finish<T extends ArgusReport>(report: T): Promise<T> {
     report.completedAt = new Date().toISOString();
     await this.persist(report);
     return report;
+  }
+}
+
+function assertRollbackSiteIdentity(
+  report: ArgusReport,
+  siteIdentity: SiteIdentity | null
+): void {
+  if (!siteIdentity) {
+    return;
+  }
+  if (report.schemaVersion !== 2 || !report.site) {
+    throw new Error(
+      `target_fingerprint_mismatch: report is not bound to named site ${siteIdentity.name}`
+    );
+  }
+  if (
+    report.site.name !== siteIdentity.name ||
+    report.site.fingerprint !== siteIdentity.fingerprint
+  ) {
+    throw new Error(
+      `target_fingerprint_mismatch: expected ${siteIdentity.name} ${siteIdentity.fingerprint} but report targets ${report.site.name} ${report.site.fingerprint}`
+    );
   }
 }
 

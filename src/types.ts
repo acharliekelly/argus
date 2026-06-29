@@ -40,6 +40,7 @@ export type ScenarioDefinition = {
   path: string;
   visualThreshold?: number;
   mask?: string[];
+  visibleSelectors?: string[];
   run?: (page: Page, context: ScenarioContext) => Promise<void>;
 };
 
@@ -47,4 +48,9 @@ export type ViewportDefinition = {
   name: string;
   width: number;
   height: number;
+};
+
+export type SiteIdentity = {
+  name: string;
+  fingerprint: string;
 };

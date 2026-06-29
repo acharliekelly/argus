@@ -1,4 +1,4 @@
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -28,8 +28,11 @@ function browserResult(passed: boolean) {
   };
 }
 
-async function createHarness(results: boolean[]) {
+type SiteIdentity = { name: string; fingerprint: string };
+
+async function createHarness(results: boolean[], siteIdentity?: SiteIdentity) {
   const root = await mkdtemp(join(tmpdir(), 'argus-orchestrator-'));
+  const store = new RunStore(root);
   const wordpress = {
     preflight: vi.fn().mockResolvedValue([{ name: 'wpcli', passed: true, message: 'ok' }]),
     inventory: vi
@@ -65,11 +68,24 @@ async function createHarness(results: boolean[]) {
       wordpress,
       snapshots,
       browser,
-      store: new RunStore(root)
+      store
     },
-    []
+    [],
+    siteIdentity ? { siteIdentity } : {}
   );
-  return { orchestrator, wordpress, snapshots, browser };
+  return { orchestrator, wordpress, snapshots, browser, store };
+}
+
+async function writeRollbackReport(
+  store: RunStore,
+  runId: string,
+  report: Record<string, unknown>
+) {
+  await store.createRun(runId);
+  await store.ensureRunDirectory(runId, 'snapshot');
+  await writeFile(store.runPath(runId, 'snapshot/database.sql'), '');
+  await writeFile(store.runPath(runId, 'snapshot/wp-content.tar.gz'), '');
+  await store.writeJson(runId, 'report.json', report);
 }
 
 describe('MaintenanceOrchestrator', () => {
@@ -150,5 +166,81 @@ describe('MaintenanceOrchestrator', () => {
     expect(report.reasonCodes).toContain('update_failed');
     expect(report.commands).toHaveLength(1);
     expect(report.commands[0]?.exitCode).toBe(1);
+  });
+
+  it('writes selected site identity into named-mode reports', async () => {
+    const siteIdentity = { name: 'melrose', fingerprint: 'sha256:abc123' };
+    const { orchestrator } = await createHarness([true, true, true], siteIdentity);
+
+    const report = await orchestrator.update({ type: 'plugin', slug: 'demo' }, 'run-named');
+
+    expect(report.site).toEqual(siteIdentity);
+  });
+
+  it('writes null site identity in config-mode reports', async () => {
+    const { orchestrator } = await createHarness([true, true, true]);
+
+    const report = await orchestrator.update({ type: 'plugin', slug: 'demo' }, 'run-config');
+
+    expect(report.site).toBeNull();
+  });
+
+  it('rejects named-site rollback for legacy schema-v1 reports', async () => {
+    const siteIdentity = { name: 'melrose', fingerprint: 'sha256:abc123' };
+    const { orchestrator, snapshots, store } = await createHarness([], siteIdentity);
+    await writeRollbackReport(store, 'run-v1', {
+      schemaVersion: 1,
+      runId: 'run-v1',
+      startedAt: new Date().toISOString(),
+      completedAt: null,
+      status: 'failed',
+      target: { type: 'plugin', slug: 'demo' },
+      reasonCodes: [],
+      recommendation: 'rollback',
+      inventory: { before: null, after: null },
+      preflight: [],
+      commands: [],
+      checks: { baseline: [], after: [], visual: [], rollback: [] },
+      snapshot: {
+        databasePath: 'snapshot/database.sql',
+        contentPath: 'snapshot/wp-content.tar.gz',
+        createdAt: new Date().toISOString()
+      },
+      rollback: null
+    });
+
+    await expect(orchestrator.rollback('run-v1')).rejects.toThrow('target_fingerprint_mismatch');
+    expect(snapshots.restore).not.toHaveBeenCalled();
+  });
+
+  it('rejects named-site rollback when report identity differs', async () => {
+    const siteIdentity = { name: 'melrose', fingerprint: 'sha256:abc123' };
+    const { orchestrator, snapshots, store } = await createHarness([], siteIdentity);
+    await writeRollbackReport(store, 'run-other-site', {
+      schemaVersion: 2,
+      site: { name: 'argus-dev', fingerprint: 'sha256:different' },
+      runId: 'run-other-site',
+      startedAt: new Date().toISOString(),
+      completedAt: null,
+      status: 'failed',
+      target: { type: 'plugin', slug: 'demo' },
+      reasonCodes: [],
+      recommendation: 'rollback',
+      inventory: { before: null, after: null },
+      preflight: [],
+      commands: [],
+      checks: { baseline: [], after: [], visual: [], rollback: [] },
+      snapshot: {
+        databasePath: 'snapshot/database.sql',
+        contentPath: 'snapshot/wp-content.tar.gz',
+        createdAt: new Date().toISOString()
+      },
+      rollback: null
+    });
+
+    await expect(orchestrator.rollback('run-other-site')).rejects.toThrow(
+      'target_fingerprint_mismatch'
+    );
+    expect(snapshots.restore).not.toHaveBeenCalled();
   });
 });

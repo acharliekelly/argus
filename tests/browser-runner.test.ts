@@ -28,7 +28,7 @@ describe('BrowserRunner', () => {
     const page = {
       setViewportSize: vi.fn(),
       goto: vi.fn(),
-      locator: vi.fn((selector: string) => ({ selector })),
+      locator: vi.fn((selector: string) => ({ selector, waitFor: vi.fn() })),
       screenshot,
       close: vi.fn()
     };
@@ -58,7 +58,7 @@ describe('BrowserRunner', () => {
       expect.objectContaining({
         path: expect.stringContaining('home-page--desktop.png'),
         fullPage: true,
-        mask: [{ selector: '.clock' }]
+        mask: [expect.objectContaining({ selector: '.clock' })]
       })
     );
   });
@@ -70,7 +70,7 @@ describe('BrowserRunner', () => {
     const page = {
       setViewportSize: vi.fn(),
       goto: vi.fn(),
-      locator: vi.fn(),
+      locator: vi.fn((selector: string) => ({ selector, waitFor: vi.fn() })),
       screenshot: vi.fn().mockImplementation(async ({ path }: { path: string }) => {
         await writeFile(path, image(255));
       }),
@@ -105,6 +105,77 @@ describe('BrowserRunner', () => {
       error: 'missing heading'
     });
     expect(result.checks[0]?.failureScreenshotPath).toContain('failure.png');
+  });
+
+  it('waits for the body to be visible before capturing declarative scenarios', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'argus-browser-'));
+    const store = new RunStore(root);
+    await store.createRun('run-1');
+    const bodyWaitFor = vi.fn();
+    const page = {
+      setViewportSize: vi.fn(),
+      goto: vi.fn(),
+      locator: vi.fn((selector: string) => ({ selector, waitFor: bodyWaitFor })),
+      screenshot: vi.fn().mockImplementation(async ({ path }: { path: string }) => {
+        await writeFile(path, image(255));
+      }),
+      close: vi.fn()
+    };
+    const browser = { newPage: vi.fn().mockResolvedValue(page), close: vi.fn() };
+    const runner = new BrowserRunner(
+      {
+        baseUrl: 'http://localhost:8093',
+        visualThreshold: 0.01,
+        scenarios: [{ name: 'home', path: '/' }],
+        viewports: [{ name: 'desktop', width: 1280, height: 720 }],
+        secrets: {}
+      },
+      store,
+      async () => browser
+    );
+
+    await runner.run('run-1', 'baseline');
+
+    expect(page.locator).toHaveBeenCalledWith('body');
+    expect(bodyWaitFor).toHaveBeenCalledWith({ state: 'visible' });
+  });
+
+  it('waits for every configured visible selector before screenshot capture', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'argus-browser-'));
+    const store = new RunStore(root);
+    await store.createRun('run-1');
+    const calls: string[] = [];
+    const page = {
+      setViewportSize: vi.fn(),
+      goto: vi.fn(),
+      locator: vi.fn((selector: string) => ({
+        selector,
+        waitFor: vi.fn(async () => {
+          calls.push(`visible:${selector}`);
+        })
+      })),
+      screenshot: vi.fn().mockImplementation(async ({ path }: { path: string }) => {
+        calls.push('screenshot');
+        await writeFile(path, image(255));
+      }),
+      close: vi.fn()
+    };
+    const browser = { newPage: vi.fn().mockResolvedValue(page), close: vi.fn() };
+    const runner = new BrowserRunner(
+      {
+        baseUrl: 'http://localhost:8093',
+        visualThreshold: 0.01,
+        scenarios: [{ name: 'home', path: '/', visibleSelectors: ['main', 'h1'] }],
+        viewports: [{ name: 'desktop', width: 1280, height: 720 }],
+        secrets: {}
+      },
+      store,
+      async () => browser
+    );
+
+    await runner.run('run-1', 'baseline');
+
+    expect(calls).toEqual(['visible:main', 'visible:h1', 'screenshot']);
   });
 
   it('compares baseline and after screenshots and writes a diff', async () => {

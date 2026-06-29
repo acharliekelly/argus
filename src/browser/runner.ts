@@ -101,6 +101,9 @@ export class BrowserRunner {
         secrets: this.settings.secrets
       };
       await scenario.run?.(page, context);
+      for (const selector of scenario.visibleSelectors ?? ['body']) {
+        await page.locator(selector).waitFor({ state: 'visible' });
+      }
       await page.screenshot({
         path: screenshotPath,
         fullPage: true,
