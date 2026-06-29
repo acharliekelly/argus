@@ -85,6 +85,7 @@ describe('DockerSnapshotService', () => {
     await writeFile(store.runPath('run-1', 'snapshot/wp-content.tar.gz'), Buffer.from('archive'));
     const helper = createHelper();
     helper.runUtility.mockResolvedValue(result(''));
+    helper.runUtilityBuffer.mockResolvedValue(bufferResult(Buffer.from('')));
     helper.runWp.mockResolvedValueOnce(result(''));
     const snapshots = new DockerSnapshotService(helper, store);
 
@@ -96,7 +97,11 @@ describe('DockerSnapshotService', () => {
 
     expect(helper.runUtility).toHaveBeenNthCalledWith(
       1,
-      ['sh', '-lc', 'rm -rf /var/www/html/wp-content && tar -xzf - -C /var/www/html'],
+      ['rm', '-rf', '/var/www/html/wp-content']
+    );
+    expect(helper.runUtilityBuffer).toHaveBeenNthCalledWith(
+      1,
+      ['tar', '-xzf', '-', '-C', '/var/www/html'],
       Buffer.from('archive')
     );
     expect(helper.runWp).toHaveBeenNthCalledWith(
@@ -105,6 +110,7 @@ describe('DockerSnapshotService', () => {
       Buffer.from('SELECT 1;')
     );
     expect(helper.runUtility).toHaveBeenCalledTimes(1);
+    expect(helper.runUtilityBuffer).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(helper.runUtility.mock.calls)).not.toContain('mariadb');
     expect(JSON.stringify(helper.runWp.mock.calls)).not.toContain('WORDPRESS_DB_PASSWORD');
     expect(JSON.stringify(helper.runUtility.mock.calls)).not.toContain('super-secret');
@@ -122,6 +128,7 @@ describe('DockerSnapshotService', () => {
     await writeFile(store.runPath('run-1', 'snapshot/wp-content.tar.gz'), Buffer.from('archive'));
     const helper = createHelper();
     helper.runUtility.mockResolvedValue(result(''));
+    helper.runUtilityBuffer.mockResolvedValue(bufferResult(Buffer.from('')));
     helper.runWp.mockResolvedValue(result(''));
     const snapshots = new DockerSnapshotService(helper, store);
 
@@ -132,6 +139,7 @@ describe('DockerSnapshotService', () => {
     });
 
     expect(helper.runUtility).toHaveBeenCalledTimes(1);
+    expect(helper.runUtilityBuffer).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(helper.runUtility.mock.calls)).not.toContain('mariadb');
     expect(helper.runWp).toHaveBeenCalledWith(
       ['db', 'import', '-', '--skip-ssl'],

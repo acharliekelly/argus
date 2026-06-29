@@ -115,6 +115,7 @@ describe('DockerSiteHelper', () => {
         })
       })
     );
+    expect(run.mock.calls[0]?.[1]).toContain('--interactive');
     expect(JSON.stringify(run.mock.calls[0]?.[1])).not.toContain(secretPassword);
     expect(JSON.stringify(record)).not.toContain(secretPassword);
     expect(record.stdout).toContain('[REDACTED]');
@@ -193,21 +194,22 @@ describe('DockerSiteHelper', () => {
     );
   });
 
-  it('runs binary utility restores through alpine with buffer input', async () => {
+  it('runs binary utility restores through alpine with interactive buffer input', async () => {
     const archive = Buffer.from('archive');
-    const run = vi.fn<ProcessRunnerLike['run']>().mockImplementation(async (_command, args) => {
-      return commandResult(args);
-    });
-    const runBuffer = vi.fn<ProcessRunnerLike['runBuffer']>();
+    const run = vi.fn<ProcessRunnerLike['run']>();
+    const runBuffer = vi.fn<ProcessRunnerLike['runBuffer']>(async (_command, args) =>
+      binaryResult(args)
+    );
     const helper = new DockerSiteHelper(site, { run, runBuffer });
 
-    await helper.runUtility(['tar', '-xzf', '-', '-C', '/var/www/html'], archive);
+    await helper.runUtilityBuffer(['tar', '-xzf', '-', '-C', '/var/www/html'], archive);
 
-    expect(run).toHaveBeenCalledWith(
+    expect(runBuffer).toHaveBeenCalledWith(
       'docker',
       expect.arrayContaining([
         'run',
         '--rm',
+        '--interactive',
         '--network',
         'project_default',
         '--volumes-from',

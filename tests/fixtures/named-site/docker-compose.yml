@@ -1,0 +1,51 @@
+services:
+  db:
+    image: mariadb:11.4
+    environment:
+      MARIADB_DATABASE: wordpress
+      MARIADB_USER: wordpress
+      MARIADB_PASSWORD: wordpress
+      MARIADB_ROOT_PASSWORD: wordpress
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  wordpress:
+    image: wordpress:6.6.2-apache
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DEBUG: "1"
+    ports:
+      - "127.0.0.1:${ARGUS_NAMED_SITE_PORT}:80"
+    volumes:
+      - ./wordpress:/var/www/html
+
+  update-server:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./updates:/usr/share/nginx/html:ro
+
+  wpcli:
+    image: wordpress:cli-2.11.0
+    depends_on:
+      db:
+        condition: service_healthy
+      wordpress:
+        condition: service_started
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+    user: "33:33"
+    volumes_from:
+      - wordpress
+    working_dir: /var/www/html

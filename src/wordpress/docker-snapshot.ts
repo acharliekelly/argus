@@ -9,7 +9,7 @@ import type { SnapshotMetadata } from './snapshot.js';
 type SnapshotHelper = {
   runWp(args: string[], input?: Buffer): Promise<CommandRecord>;
   runUtility(args: string[], input?: Buffer): Promise<CommandRecord>;
-  runUtilityBuffer(args: string[]): Promise<BinaryCommandResult>;
+  runUtilityBuffer(args: string[], input?: Buffer): Promise<BinaryCommandResult>;
 };
 
 const DATABASE_SNAPSHOT_PATH = 'snapshot/database.sql' as const;
@@ -56,8 +56,13 @@ export class DockerSnapshotService {
     const archive = await readFile(contentPath);
 
     assertCommandPassed(
-      await this.helper.runUtility(
-        ['sh', '-lc', 'rm -rf /var/www/html/wp-content && tar -xzf - -C /var/www/html'],
+      await this.helper.runUtility(['rm', '-rf', '/var/www/html/wp-content']),
+      'Remove existing WordPress content before restore'
+    );
+
+    assertBinaryCommandPassed(
+      await this.helper.runUtilityBuffer(
+        ['tar', '-xzf', '-', '-C', '/var/www/html'],
         archive
       ),
       'Restore WordPress content'

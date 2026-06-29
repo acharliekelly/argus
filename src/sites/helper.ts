@@ -50,12 +50,12 @@ export class DockerSiteHelper {
     return this.runText(UTILITY_IMAGE, args, input === undefined ? {} : { input });
   }
 
-  async runUtilityBuffer(args: string[]): Promise<BinaryCommandResult> {
+  async runUtilityBuffer(args: string[], input?: Buffer): Promise<BinaryCommandResult> {
     try {
       const result = await this.runner.runBuffer(
         'docker',
-        this.dockerArgs(UTILITY_IMAGE, args),
-        this.runOptions()
+        this.dockerArgs(UTILITY_IMAGE, args, input !== undefined),
+        input === undefined ? this.runOptions() : { ...this.runOptions(), input }
       );
       return this.redactBinaryRecord(result);
     } catch (error) {
@@ -69,7 +69,7 @@ export class DockerSiteHelper {
     options: Pick<RunOptions, 'input'> = {}
   ): Promise<CommandRecord> {
     try {
-      const result = await this.runner.run('docker', this.dockerArgs(image, args), {
+      const result = await this.runner.run('docker', this.dockerArgs(image, args, options.input !== undefined), {
         ...this.runOptions(),
         ...options
       });
@@ -79,10 +79,11 @@ export class DockerSiteHelper {
     }
   }
 
-  private dockerArgs(image: string, args: string[]): string[] {
+  private dockerArgs(image: string, args: string[], interactive = false): string[] {
     return [
       'run',
       '--rm',
+      ...(interactive ? ['--interactive'] : []),
       '--network',
       this.networkName,
       '--volumes-from',
