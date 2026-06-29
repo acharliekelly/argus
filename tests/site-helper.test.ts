@@ -45,7 +45,8 @@ describe('DockerSiteHelper', () => {
     const run = vi.fn<ProcessRunnerLike['run']>().mockImplementation(async (_command, args) => {
       return commandResult(args);
     });
-    const helper = new DockerSiteHelper(site, { run });
+    const runBuffer = vi.fn<ProcessRunnerLike['runBuffer']>();
+    const helper = new DockerSiteHelper(site, { run, runBuffer });
 
     await helper.runWp(['plugin', 'list']);
 
@@ -90,7 +91,8 @@ describe('DockerSiteHelper', () => {
         stdout: `stdout ${secretPassword}`
       })
     );
-    const helper = new DockerSiteHelper(site, { run });
+    const runBuffer = vi.fn<ProcessRunnerLike['runBuffer']>();
+    const helper = new DockerSiteHelper(site, { run, runBuffer });
 
     const result = await helper.runWp(['core', 'version']);
 
@@ -103,7 +105,8 @@ describe('DockerSiteHelper', () => {
     const run = vi.fn<ProcessRunnerLike['run']>().mockRejectedValue(
       new Error(`docker failed with ${secretPassword}`)
     );
-    const helper = new DockerSiteHelper(site, { run });
+    const runBuffer = vi.fn<ProcessRunnerLike['runBuffer']>();
+    const helper = new DockerSiteHelper(site, { run, runBuffer });
 
     await expect(helper.runWp(['core', 'version'])).rejects.toThrow('[REDACTED]');
     await expect(helper.runWp(['core', 'version'])).rejects.not.toThrow(secretPassword);
@@ -112,7 +115,9 @@ describe('DockerSiteHelper', () => {
   it('runs binary utility archives through alpine with binary stdout', async () => {
     const archive = Buffer.from('archive');
     const run = vi.fn<ProcessRunnerLike['run']>();
-    const runBuffer = vi.fn(async (_command: string, args: string[]) => binaryResult(args, archive));
+    const runBuffer = vi.fn<ProcessRunnerLike['runBuffer']>(async (_command, args) =>
+      binaryResult(args, archive)
+    );
     const helper = new DockerSiteHelper(site, { run, runBuffer });
 
     const result = await helper.runUtilityBuffer([
@@ -157,7 +162,8 @@ describe('DockerSiteHelper', () => {
     const run = vi.fn<ProcessRunnerLike['run']>().mockImplementation(async (_command, args) => {
       return commandResult(args);
     });
-    const helper = new DockerSiteHelper(site, { run });
+    const runBuffer = vi.fn<ProcessRunnerLike['runBuffer']>();
+    const helper = new DockerSiteHelper(site, { run, runBuffer });
 
     await helper.runUtility(['tar', '-xzf', '-', '-C', '/var/www/html'], archive);
 

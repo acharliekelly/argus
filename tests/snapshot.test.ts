@@ -23,9 +23,10 @@ describe('SnapshotService', () => {
       order.push(args.includes('db') ? 'database' : 'content');
       return result();
     });
+    const runBuffer = vi.fn<ProcessRunnerLike['runBuffer']>();
     const root = await mkdtemp(join(tmpdir(), 'argus-snapshot-'));
     const snapshots = new SnapshotService(
-      { run },
+      { run, runBuffer },
       {
         composeFile: 'docker-compose.yml',
         wpCliService: 'wpcli',
@@ -53,8 +54,9 @@ describe('SnapshotService', () => {
       }
       return result();
     });
+    const runBuffer = vi.fn<ProcessRunnerLike['runBuffer']>();
     const snapshots = new SnapshotService(
-      { run },
+      { run, runBuffer },
       {
         composeFile: 'docker-compose.yml',
         wpCliService: 'wpcli',

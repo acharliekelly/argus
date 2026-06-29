@@ -25,8 +25,9 @@ describe('WordPressAdapter', () => {
         )
       )
       .mockResolvedValueOnce(result('[]'));
+    const runBuffer = vi.fn<ProcessRunnerLike['runBuffer']>();
     const adapter = new WordPressAdapter(
-      { run },
+      { run, runBuffer },
       { file: 'docker-compose.yml', wpCliService: 'wpcli', wordpressService: 'wordpress' }
     );
 
@@ -41,8 +42,9 @@ describe('WordPressAdapter', () => {
 
   it('updates only plugin or theme targets', async () => {
     const run = vi.fn<ProcessRunnerLike['run']>().mockResolvedValue(result('Success'));
+    const runBuffer = vi.fn<ProcessRunnerLike['runBuffer']>();
     const adapter = new WordPressAdapter(
-      { run },
+      { run, runBuffer },
       { file: 'docker-compose.yml', wpCliService: 'wpcli', wordpressService: 'wordpress' }
     );
 

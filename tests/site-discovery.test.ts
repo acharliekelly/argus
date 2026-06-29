@@ -378,6 +378,7 @@ function inspectRow(
 
 function fakeRunner(composeOutput: string, inspections: InspectRow[]): ProcessRunnerLike & {
   run: ReturnType<typeof vi.fn<ProcessRunnerLike['run']>>;
+  runBuffer: ReturnType<typeof vi.fn<ProcessRunnerLike['runBuffer']>>;
 } {
   const run = vi.fn<ProcessRunnerLike['run']>(async (_command, args) => {
     const stdout = args[0] === 'compose' ? composeOutput : JSON.stringify(inspections);
@@ -390,5 +391,6 @@ function fakeRunner(composeOutput: string, inspections: InspectRow[]): ProcessRu
       durationMs: 1
     };
   });
-  return { run };
+  const runBuffer = vi.fn<ProcessRunnerLike['runBuffer']>();
+  return { run, runBuffer };
 }

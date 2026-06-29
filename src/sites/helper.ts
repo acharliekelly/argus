@@ -23,18 +23,14 @@ type HelperSite = {
   wordpressEnvironment?: Record<string, string>;
 };
 
-type HelperRunner = ProcessRunnerLike & {
-  runBuffer?: NonNullable<ProcessRunnerLike['runBuffer']>;
-};
-
 export class DockerSiteHelper {
   private readonly containerId: string;
   private readonly networkName: string;
   private readonly helperImage: string;
   private readonly wordpressEnvironment: Record<string, string>;
-  private readonly runner: HelperRunner;
+  private readonly runner: ProcessRunnerLike;
 
-  constructor(site: HelperSite, runner: HelperRunner = new ProcessRunner()) {
+  constructor(site: HelperSite, runner: ProcessRunnerLike = new ProcessRunner()) {
     this.containerId = site.containerId;
     this.networkName = site.networkName;
     this.helperImage = site.helperImage ?? DEFAULT_HELPER_IMAGE;
@@ -51,9 +47,6 @@ export class DockerSiteHelper {
   }
 
   async runUtilityBuffer(args: string[]): Promise<BinaryCommandResult> {
-    if (!this.runner.runBuffer) {
-      throw new Error('runBuffer is required for binary helper commands');
-    }
     try {
       const result = await this.runner.runBuffer(
         'docker',

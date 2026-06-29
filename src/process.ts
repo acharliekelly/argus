@@ -14,7 +14,7 @@ export type RunOptions = {
 
 export interface ProcessRunnerLike {
   run(command: string, args: string[], options?: RunOptions): Promise<CommandRecord>;
-  runBuffer?(
+  runBuffer(
     command: string,
     args: string[],
     options?: RunOptions
