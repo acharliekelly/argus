@@ -1,46 +1,32 @@
 #!/usr/bin/env node
 import { Command, Option } from 'commander';
-import { BrowserRunner } from './browser/runner.js';
 import {
   assertSafeRunId,
   createRunId,
   exitCodeForReport,
-  renderReportSummary
+  renderReportSummary,
+  resolveRuntimeSelection
 } from './cli-support.js';
-import { loadConfig } from './config.js';
-import { MaintenanceOrchestrator } from './orchestrator.js';
-import { ProcessRunner } from './process.js';
-import { RunLock, RunStore } from './run-store.js';
+import { createConfigRuntime, createSiteRuntime, type ArgusRuntime } from './sites/runtime.js';
 import type { UpdateTarget } from './types.js';
-import { WordPressAdapter } from './wordpress/adapter.js';
-import { SnapshotService } from './wordpress/snapshot.js';
 
 type GlobalOptions = {
   config: string;
+  site?: string;
 };
-
-async function createRuntime(configPath: string) {
-  const config = await loadConfig(configPath);
-  const runner = new ProcessRunner();
-  const store = new RunStore(config.artifactDir);
-  const wordpress = new WordPressAdapter(runner, config.compose);
-  const snapshots = new SnapshotService(runner, {
-    composeFile: config.compose.file,
-    wpCliService: config.compose.wpCliService,
-    wordpressService: config.compose.wordpressService,
-    artifactRoot: config.artifactDir,
-    profiles: config.compose.profiles
-  });
-  const browser = new BrowserRunner(config, store);
-  const orchestrator = new MaintenanceOrchestrator(
-    { wordpress, snapshots, browser, store },
-    config.secretValues
-  );
-  return { config, store, wordpress, browser, orchestrator };
-}
 
 function globalOptions(command: Command): GlobalOptions {
   return command.optsWithGlobals<GlobalOptions>();
+}
+
+async function createRuntime(command: Command): Promise<ArgusRuntime> {
+  const selection = resolveRuntimeSelection(globalOptions(command), (name) =>
+    command.getOptionValueSourceWithGlobals(name)
+  );
+  if (selection.mode === 'site') {
+    return createSiteRuntime(selection.site);
+  }
+  return createConfigRuntime(selection.configPath);
 }
 
 export function createProgram(): Command {
@@ -48,13 +34,14 @@ export function createProgram(): Command {
     .name('argus')
     .description('Safely evaluate WordPress plugin and theme updates')
     .version('0.1.0')
-    .option('-c, --config <path>', 'configuration file', 'argus.config.ts');
+    .option('-c, --config <path>', 'configuration file', 'argus.config.ts')
+    .addOption(new Option('--site <name>', 'saved named site profile'));
 
   program
     .command('inventory')
     .description('Print the current WordPress inventory')
     .action(async (_options, command: Command) => {
-      const runtime = await createRuntime(globalOptions(command).config);
+      const runtime = await createRuntime(command);
       const preflight = await runtime.wordpress.preflight();
       if (preflight.some(({ passed }) => !passed)) {
         console.error(JSON.stringify({ preflight }, null, 2));
@@ -68,7 +55,7 @@ export function createProgram(): Command {
     .command('check')
     .description('Run configured functional checks and capture baseline screenshots')
     .action(async (_options, command: Command) => {
-      const runtime = await createRuntime(globalOptions(command).config);
+      const runtime = await createRuntime(command);
       const runId = `check-${createRunId()}`;
       await runtime.store.createRun(runId);
       const result = await runtime.browser.run(runId, 'baseline');
@@ -85,17 +72,16 @@ export function createProgram(): Command {
     )
     .requiredOption('--slug <slug>', 'plugin or theme slug')
     .action(async (options: { type: 'plugin' | 'theme'; slug: string }, command: Command) => {
-      const runtime = await createRuntime(globalOptions(command).config);
+      const runtime = await createRuntime(command);
       const runId = createRunId();
-      const lock = new RunLock(runtime.config.artifactDir);
-      await lock.acquire(runId);
+      await runtime.lock.acquire(runId);
       try {
         const target: UpdateTarget = { type: options.type, slug: options.slug };
         const report = await runtime.orchestrator.update(target, runId);
         console.log(renderReportSummary(report));
         process.exitCode = exitCodeForReport(report);
       } finally {
-        await lock.release();
+        await runtime.lock.release();
       }
     });
 
@@ -105,15 +91,14 @@ export function createProgram(): Command {
     .requiredOption('--run <run-id>', 'run ID to restore')
     .action(async (options: { run: string }, command: Command) => {
       assertSafeRunId(options.run);
-      const runtime = await createRuntime(globalOptions(command).config);
-      const lock = new RunLock(runtime.config.artifactDir);
-      await lock.acquire(`rollback-${options.run}`);
+      const runtime = await createRuntime(command);
+      await runtime.lock.acquire(`rollback-${options.run}`);
       try {
         const report = await runtime.orchestrator.rollback(options.run);
         console.log(renderReportSummary(report));
         process.exitCode = exitCodeForReport(report);
       } finally {
-        await lock.release();
+        await runtime.lock.release();
       }
     });
 

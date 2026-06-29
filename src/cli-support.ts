@@ -1,5 +1,20 @@
 import type { ArgusReport } from './report.js';
 
+type RuntimeSelectionOptions = {
+  config?: string;
+  site?: string;
+};
+
+export type RuntimeSelection =
+  | {
+      mode: 'config';
+      configPath: string;
+    }
+  | {
+      mode: 'site';
+      site: string;
+    };
+
 export function createRunId(date = new Date()): string {
   return date.toISOString().replace(/[-:.]/g, '');
 }
@@ -30,4 +45,19 @@ export function renderReportSummary(report: ArgusReport): string {
     `Reasons: ${reasons}`,
     `Recommendation: ${report.recommendation}`
   ].join('\n');
+}
+
+export function resolveRuntimeSelection(
+  options: RuntimeSelectionOptions,
+  sourceFor: (name: 'config' | 'site') => string | undefined
+): RuntimeSelection {
+  if (options.site) {
+    const configSource = sourceFor('config');
+    if (options.config && configSource !== undefined && configSource !== 'default') {
+      throw new Error('--site cannot be used with --config');
+    }
+    return { mode: 'site', site: options.site };
+  }
+
+  return { mode: 'config', configPath: options.config ?? 'argus.config.ts' };
 }
