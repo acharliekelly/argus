@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createRunId,
   exitCodeForStatus,
   renderReportSummary,
   resolveRuntimeSelection
 } from '../src/cli-support.js';
+import { createProgram } from '../src/cli.js';
 import { createInitialReport } from '../src/report.js';
 
 describe('CLI support', () => {
@@ -63,5 +64,55 @@ describe('CLI support', () => {
         (name) => (name === 'config' ? 'cli' : name === 'site' ? 'cli' : undefined)
       )
     ).toThrow('--site cannot be used with --config');
+  });
+
+  it('wires named-site management subcommands through Commander', async () => {
+    const write = vi.fn();
+    const siteCommands = {
+      connect: vi.fn().mockResolvedValue('connected'),
+      list: vi.fn().mockResolvedValue('alpha\nzeta'),
+      show: vi.fn().mockResolvedValue('{"name":"alpha"}'),
+      edit: vi.fn().mockResolvedValue('updated'),
+      disconnect: vi.fn().mockResolvedValue('disconnected')
+    };
+    const program = createProgram({ siteCommands, write });
+
+    await program.parseAsync([
+      'node',
+      'argus',
+      'connect',
+      'wp-melroseuu',
+      '--compose',
+      '/site/docker-compose.yml',
+      '--wordpress-service',
+      'wordpress',
+      '--url',
+      'http://localhost:8090',
+      '--helper-image',
+      'wordpress:cli-php8.3',
+      '--force'
+    ]);
+    await program.parseAsync(['node', 'argus', 'site', 'list']);
+    await program.parseAsync(['node', 'argus', 'site', 'show', 'wp-melroseuu']);
+    await program.parseAsync(['node', 'argus', 'site', 'edit', 'wp-melroseuu']);
+    await program.parseAsync(['node', 'argus', 'site', 'disconnect', 'wp-melroseuu']);
+
+    expect(siteCommands.connect).toHaveBeenCalledWith({
+      name: 'wp-melroseuu',
+      composeFile: '/site/docker-compose.yml',
+      wordpressService: 'wordpress',
+      baseUrl: 'http://localhost:8090',
+      helperImage: 'wordpress:cli-php8.3',
+      force: true
+    });
+    expect(siteCommands.list).toHaveBeenCalledWith();
+    expect(siteCommands.show).toHaveBeenCalledWith('wp-melroseuu');
+    expect(siteCommands.edit).toHaveBeenCalledWith('wp-melroseuu');
+    expect(siteCommands.disconnect).toHaveBeenCalledWith('wp-melroseuu');
+    expect(write).toHaveBeenCalledWith('connected');
+    expect(write).toHaveBeenCalledWith('alpha\nzeta');
+    expect(write).toHaveBeenCalledWith('{"name":"alpha"}');
+    expect(write).toHaveBeenCalledWith('updated');
+    expect(write).toHaveBeenCalledWith('disconnected');
   });
 });

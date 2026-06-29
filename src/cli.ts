@@ -7,6 +7,14 @@ import {
   renderReportSummary,
   resolveRuntimeSelection
 } from './cli-support.js';
+import {
+  connectSiteCommand,
+  disconnectSiteCommand,
+  editSiteCommand,
+  listSitesCommand,
+  showSiteCommand,
+  type ConnectSiteCommandInput
+} from './sites/commands.js';
 import { createConfigRuntime, createSiteRuntime, type ArgusRuntime } from './sites/runtime.js';
 import type { UpdateTarget } from './types.js';
 
@@ -29,7 +37,22 @@ async function createRuntime(command: Command): Promise<ArgusRuntime> {
   return createConfigRuntime(selection.configPath);
 }
 
-export function createProgram(): Command {
+export type SiteCommandHandlers = {
+  connect(input: ConnectSiteCommandInput): Promise<string>;
+  list(): Promise<string>;
+  show(name: string): Promise<string>;
+  edit(name: string): Promise<string>;
+  disconnect(name: string): Promise<string>;
+};
+
+export type CreateProgramOptions = {
+  siteCommands?: SiteCommandHandlers;
+  write?: (output: string) => void;
+};
+
+export function createProgram(options: CreateProgramOptions = {}): Command {
+  const siteCommands = options.siteCommands ?? defaultSiteCommandHandlers();
+  const write = options.write ?? ((output: string) => console.log(output));
   const program = new Command()
     .name('argus')
     .description('Safely evaluate WordPress plugin and theme updates')
@@ -102,7 +125,86 @@ export function createProgram(): Command {
       }
     });
 
+  program
+    .command('connect')
+    .description('Connect Argus to a named WordPress site')
+    .argument('<name>', 'saved site name')
+    .requiredOption('--compose <file>', 'Docker Compose file')
+    .option('--wordpress-service <service>', 'WordPress Compose service')
+    .option('--url <url>', 'WordPress site URL')
+    .option('--helper-image <image>', 'WordPress CLI helper image')
+    .option('--force', 'overwrite an existing site profile', false)
+    .action(
+      async (
+        name: string,
+        commandOptions: {
+          compose: string;
+          wordpressService?: string;
+          url?: string;
+          helperImage?: string;
+          force: boolean;
+        }
+      ) => {
+        const input: ConnectSiteCommandInput = {
+          name,
+          composeFile: commandOptions.compose,
+          ...(commandOptions.wordpressService === undefined
+            ? {}
+            : { wordpressService: commandOptions.wordpressService }),
+          ...(commandOptions.url === undefined ? {} : { baseUrl: commandOptions.url }),
+          ...(commandOptions.helperImage === undefined
+            ? {}
+            : { helperImage: commandOptions.helperImage }),
+          force: commandOptions.force
+        };
+        write(await siteCommands.connect(input));
+      }
+    );
+
+  const site = program.command('site').description('Manage saved named site profiles');
+
+  site
+    .command('list')
+    .description('List saved site names')
+    .action(async () => {
+      write(await siteCommands.list());
+    });
+
+  site
+    .command('show')
+    .description('Show a saved site profile as JSON')
+    .argument('<name>', 'saved site name')
+    .action(async (name: string) => {
+      write(await siteCommands.show(name));
+    });
+
+  site
+    .command('edit')
+    .description('Edit a saved site profile')
+    .argument('<name>', 'saved site name')
+    .action(async (name: string) => {
+      write(await siteCommands.edit(name));
+    });
+
+  site
+    .command('disconnect')
+    .description('Remove a saved site profile')
+    .argument('<name>', 'saved site name')
+    .action(async (name: string) => {
+      write(await siteCommands.disconnect(name));
+    });
+
   return program;
+}
+
+function defaultSiteCommandHandlers(): SiteCommandHandlers {
+  return {
+    connect: connectSiteCommand,
+    list: listSitesCommand,
+    show: showSiteCommand,
+    edit: editSiteCommand,
+    disconnect: disconnectSiteCommand
+  };
 }
 
 export async function main(argv = process.argv): Promise<void> {

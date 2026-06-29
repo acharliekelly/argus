@@ -13,6 +13,7 @@ export type ConnectSiteInput = {
   composeFile: string;
   wordpressService?: string | undefined;
   baseUrl?: string | undefined;
+  helperImage?: string | undefined;
   force?: boolean;
 };
 
@@ -75,6 +76,7 @@ export async function connectSite(
       projectName: discovered.projectName,
       wordpressService: discovered.wordpressService,
       baseUrl: discovered.baseUrl,
+      ...(input.helperImage === undefined ? {} : { helperImage: input.helperImage }),
       wordpressMount: discovered.wordpressMount,
       networkName: discovered.networkName
     },
