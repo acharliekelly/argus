@@ -84,6 +84,42 @@ describe('DockerSiteHelper', () => {
     expect(run.mock.calls[0]?.[1].join(' ')).not.toContain(secretPassword);
   });
 
+  it('passes buffer input to WP commands without putting secrets in command args or records', async () => {
+    const sql = Buffer.from('CREATE TABLE example (secret varchar(255));');
+    const run = vi.fn<ProcessRunnerLike['run']>().mockImplementation(async (_command, args) => {
+      return commandResult(args, {
+        stdout: `imported with ${secretPassword}`,
+        stderr: ''
+      });
+    });
+    const runBuffer = vi.fn<ProcessRunnerLike['runBuffer']>();
+    const helper = new DockerSiteHelper(site, { run, runBuffer });
+
+    const record = await helper.runWp(['db', 'import', '-', '--skip-ssl'], sql);
+
+    expect(run).toHaveBeenCalledWith(
+      'docker',
+      expect.arrayContaining([
+        'wordpress:cli',
+        'wp',
+        'db',
+        'import',
+        '-',
+        '--skip-ssl',
+        '--allow-root'
+      ]),
+      expect.objectContaining({
+        input: sql,
+        env: expect.objectContaining({
+          WORDPRESS_DB_PASSWORD: secretPassword
+        })
+      })
+    );
+    expect(JSON.stringify(run.mock.calls[0]?.[1])).not.toContain(secretPassword);
+    expect(JSON.stringify(record)).not.toContain(secretPassword);
+    expect(record.stdout).toContain('[REDACTED]');
+  });
+
   it('redacts environment values from returned command records', async () => {
     const run = vi.fn<ProcessRunnerLike['run']>().mockResolvedValue(
       commandResult([], {

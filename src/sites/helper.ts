@@ -38,8 +38,12 @@ export class DockerSiteHelper {
     this.runner = runner;
   }
 
-  async runWp(args: string[]): Promise<CommandRecord> {
-    return this.runText(this.helperImage, ['wp', ...args, '--allow-root']);
+  async runWp(args: string[], input?: Buffer): Promise<CommandRecord> {
+    return this.runText(
+      this.helperImage,
+      ['wp', ...args, '--allow-root'],
+      input === undefined ? {} : { input }
+    );
   }
 
   async runUtility(args: string[], input?: Buffer): Promise<CommandRecord> {

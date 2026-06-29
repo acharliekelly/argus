@@ -7,7 +7,7 @@ import type { CommandRecord } from '../types.js';
 import type { SnapshotMetadata } from './snapshot.js';
 
 type SnapshotHelper = {
-  runWp(args: string[]): Promise<CommandRecord>;
+  runWp(args: string[], input?: Buffer): Promise<CommandRecord>;
   runUtility(args: string[], input?: Buffer): Promise<CommandRecord>;
   runUtilityBuffer(args: string[]): Promise<BinaryCommandResult>;
 };
@@ -63,26 +63,10 @@ export class DockerSnapshotService {
       'Restore WordPress content'
     );
 
-    const [databaseHost, databaseUser, databaseName] = await Promise.all([
-      this.readWordPressConfig('DB_HOST'),
-      this.readWordPressConfig('DB_USER'),
-      this.readWordPressConfig('DB_NAME')
-    ]);
-    const { host, port } = parseDatabaseHost(databaseHost);
     assertCommandPassed(
-      await this.helper.runUtility(
-        mariaDbRestoreArgs(host, port, databaseUser, databaseName),
-        await readFile(databasePath)
-      ),
+      await this.helper.runWp(['db', 'import', '-', '--skip-ssl'], await readFile(databasePath)),
       'Restore WordPress database'
     );
-  }
-
-  private async readWordPressConfig(name: string): Promise<string> {
-    return assertCommandPassed(
-      await this.helper.runWp(['config', 'get', name]),
-      `Read WordPress ${name}`
-    ).stdout.trim();
   }
 }
 
@@ -102,41 +86,4 @@ function assertBinaryCommandPassed(
     );
   }
   return result;
-}
-
-function parseDatabaseHost(value: string): { host: string; port: string | null } {
-  const match = /^(.*):(\d+)$/.exec(value);
-  if (!match) {
-    return { host: value, port: null };
-  }
-  return { host: match[1] ?? value, port: match[2] ?? null };
-}
-
-function mariaDbRestoreArgs(
-  host: string,
-  port: string | null,
-  user: string,
-  database: string
-): string[] {
-  if (port) {
-    return [
-      'sh',
-      '-lc',
-      'MYSQL_PWD="$WORDPRESS_DB_PASSWORD" exec mariadb --skip-ssl --host="$1" --port="$2" --user="$3" "$4"',
-      'mariadb-restore',
-      host,
-      port,
-      user,
-      database
-    ];
-  }
-  return [
-    'sh',
-    '-lc',
-    'MYSQL_PWD="$WORDPRESS_DB_PASSWORD" exec mariadb --skip-ssl --host="$1" --user="$2" "$3"',
-    'mariadb-restore',
-    host,
-    user,
-    database
-  ];
 }

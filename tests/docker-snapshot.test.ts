@@ -85,10 +85,7 @@ describe('DockerSnapshotService', () => {
     await writeFile(store.runPath('run-1', 'snapshot/wp-content.tar.gz'), Buffer.from('archive'));
     const helper = createHelper();
     helper.runUtility.mockResolvedValue(result(''));
-    helper.runWp
-      .mockResolvedValueOnce(result('db:3306'))
-      .mockResolvedValueOnce(result('wp_user'))
-      .mockResolvedValueOnce(result('wp_database'));
+    helper.runWp.mockResolvedValueOnce(result(''));
     const snapshots = new DockerSnapshotService(helper, store);
 
     await snapshots.restore('run-1', {
@@ -102,29 +99,21 @@ describe('DockerSnapshotService', () => {
       ['sh', '-lc', 'rm -rf /var/www/html/wp-content && tar -xzf - -C /var/www/html'],
       Buffer.from('archive')
     );
-    expect(helper.runWp).toHaveBeenNthCalledWith(1, ['config', 'get', 'DB_HOST']);
-    expect(helper.runWp).toHaveBeenNthCalledWith(2, ['config', 'get', 'DB_USER']);
-    expect(helper.runWp).toHaveBeenNthCalledWith(3, ['config', 'get', 'DB_NAME']);
-    expect(helper.runUtility).toHaveBeenNthCalledWith(
-      2,
-      [
-        'sh',
-        '-lc',
-        'MYSQL_PWD="$WORDPRESS_DB_PASSWORD" exec mariadb --skip-ssl --host="$1" --port="$2" --user="$3" "$4"',
-        'mariadb-restore',
-        'db',
-        '3306',
-        'wp_user',
-        'wp_database'
-      ],
+    expect(helper.runWp).toHaveBeenNthCalledWith(
+      1,
+      ['db', 'import', '-', '--skip-ssl'],
       Buffer.from('SELECT 1;')
     );
-    expect(JSON.stringify(helper.runUtility.mock.calls)).toContain('WORDPRESS_DB_PASSWORD');
+    expect(helper.runUtility).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(helper.runUtility.mock.calls)).not.toContain('mariadb');
+    expect(JSON.stringify(helper.runWp.mock.calls)).not.toContain('WORDPRESS_DB_PASSWORD');
     expect(JSON.stringify(helper.runUtility.mock.calls)).not.toContain('super-secret');
+    expect(JSON.stringify(helper.runWp.mock.calls)).not.toContain('super-secret');
     expect(JSON.stringify(helper.runUtility.mock.calls)).not.toContain('/argus');
+    expect(JSON.stringify(helper.runWp.mock.calls)).not.toContain('/argus');
   });
 
-  it('restores database without a port using WORDPRESS_DB_PASSWORD as MYSQL_PWD', async () => {
+  it('does not call alpine mariadb when restoring a database snapshot', async () => {
     const root = await mkdtemp(join(tmpdir(), 'argus-docker-snapshot-'));
     const store = new RunStore(root);
     await store.createRun('run-1');
@@ -133,10 +122,7 @@ describe('DockerSnapshotService', () => {
     await writeFile(store.runPath('run-1', 'snapshot/wp-content.tar.gz'), Buffer.from('archive'));
     const helper = createHelper();
     helper.runUtility.mockResolvedValue(result(''));
-    helper.runWp
-      .mockResolvedValueOnce(result('db'))
-      .mockResolvedValueOnce(result('wp_user'))
-      .mockResolvedValueOnce(result('wp_database'));
+    helper.runWp.mockResolvedValue(result(''));
     const snapshots = new DockerSnapshotService(helper, store);
 
     await snapshots.restore('run-1', {
@@ -145,22 +131,12 @@ describe('DockerSnapshotService', () => {
       createdAt: new Date().toISOString()
     });
 
-    expect(helper.runUtility).toHaveBeenNthCalledWith(
-      2,
-      [
-        'sh',
-        '-lc',
-        'MYSQL_PWD="$WORDPRESS_DB_PASSWORD" exec mariadb --skip-ssl --host="$1" --user="$2" "$3"',
-        'mariadb-restore',
-        'db',
-        'wp_user',
-        'wp_database'
-      ],
+    expect(helper.runUtility).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(helper.runUtility.mock.calls)).not.toContain('mariadb');
+    expect(helper.runWp).toHaveBeenCalledWith(
+      ['db', 'import', '-', '--skip-ssl'],
       Buffer.from('SELECT 1;')
     );
-    expect(JSON.stringify(helper.runUtility.mock.calls)).toContain('WORDPRESS_DB_PASSWORD');
-    expect(JSON.stringify(helper.runUtility.mock.calls)).not.toContain('super-secret');
-    expect(JSON.stringify(helper.runUtility.mock.calls)).not.toContain('/argus');
   });
 
   it('rejects restore metadata paths that escape the run directory', async () => {
