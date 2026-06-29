@@ -22,4 +22,17 @@ describe('ProcessRunner', () => {
     expect(result.exitCode).toBe(7);
     expect(result.stderr).toBe('bad');
   });
+
+  it('captures binary stdout as a Buffer', async () => {
+    const runner = new ProcessRunner();
+    const result = await runner.runBuffer('/bin/sh', [
+      '-c',
+      "printf '\\000\\377binary'"
+    ]);
+
+    expect(result.stdout).toBeInstanceOf(Buffer);
+    expect(result.stdout).toEqual(Buffer.from([0, 255, ...Buffer.from('binary')]));
+    expect(result.stderr).toBe('');
+    expect(result.exitCode).toBe(0);
+  });
 });
