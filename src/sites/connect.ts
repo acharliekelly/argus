@@ -5,7 +5,6 @@ import type { DiscoveredSite, DiscoverSiteInput } from './discovery.js';
 import { discoverSite as defaultDiscoverSite } from './discovery.js';
 import type { DockerSiteHelper } from './helper.js';
 import { DockerSiteHelper as DefaultDockerSiteHelper } from './helper.js';
-import { resolveSitePaths } from './paths.js';
 import type { SiteProfile } from './profile.js';
 import { SiteStore } from './store.js';
 
@@ -26,7 +25,6 @@ export type ConnectSiteDependencies = {
   }): Pick<DockerSiteHelper, 'runWp'>;
   fetch(url: string): Promise<{ ok: boolean; status: number }>;
   store: SiteStore;
-  environment?: NodeJS.ProcessEnv;
 };
 
 export type ConnectSiteResult = {
@@ -64,7 +62,7 @@ export async function connectSite(
     throw new Error(`site_url_fetch failed with status ${response.status}: ${discovered.baseUrl}`);
   }
 
-  const paths = resolveSitePaths(input.name, dependencies.environment);
+  const paths = dependencies.store.paths(input.name);
   await mkdir(paths.dataRoot, { recursive: true });
   await access(paths.dataRoot, constants.W_OK);
 
@@ -111,7 +109,6 @@ function discoveryInput(input: ConnectSiteInput): DiscoverSiteInput {
 function resolveDependencies(
   dependencies: Partial<ConnectSiteDependencies> = {}
 ): ConnectSiteDependencies {
-  const environment = dependencies.environment ?? process.env;
   return {
     discoverSite: dependencies.discoverSite ?? defaultDiscoverSite,
     createHelper:
@@ -125,7 +122,6 @@ function resolveDependencies(
         }
         return globalThis.fetch(url);
       }),
-    store: dependencies.store ?? new SiteStore(environment),
-    environment
+    store: dependencies.store ?? new SiteStore(process.env)
   };
 }

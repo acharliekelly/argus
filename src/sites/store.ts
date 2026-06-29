@@ -1,15 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { link, mkdir, open, readFile, readdir, rename, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { resolveSitePaths } from './paths.js';
+import { resolveSitePaths, type SitePaths } from './paths.js';
 import { siteProfileSchema, type SiteProfile } from './profile.js';
 
 export class SiteStore {
   constructor(private readonly environment: NodeJS.ProcessEnv = process.env) {}
 
+  paths(name: string): SitePaths {
+    return resolveSitePaths(name, this.environment);
+  }
+
   async save(input: unknown, force = false): Promise<SiteProfile> {
     const profile = siteProfileSchema.parse(input);
-    const paths = resolveSitePaths(profile.name, this.environment);
+    const paths = this.paths(profile.name);
 
     await mkdir(dirname(paths.profilePath), { recursive: true });
     await mkdir(paths.dataRoot, { recursive: true });
@@ -43,13 +47,13 @@ export class SiteStore {
   }
 
   async load(name: string): Promise<SiteProfile> {
-    const { profilePath } = resolveSitePaths(name, this.environment);
+    const { profilePath } = this.paths(name);
     const input: unknown = JSON.parse(await readFile(profilePath, 'utf8'));
     return siteProfileSchema.parse(input);
   }
 
   async list(): Promise<string[]> {
-    const { profilePath } = resolveSitePaths('profile', this.environment);
+    const { profilePath } = this.paths('profile');
     const profileDirectory = dirname(profilePath);
 
     let entries;
@@ -67,7 +71,7 @@ export class SiteStore {
       .map((entry) => entry.name.slice(0, -'.json'.length))
       .filter((name) => {
         try {
-          resolveSitePaths(name, this.environment);
+          this.paths(name);
           return true;
         } catch {
           return false;
@@ -77,7 +81,7 @@ export class SiteStore {
   }
 
   async disconnect(name: string): Promise<void> {
-    const { profilePath } = resolveSitePaths(name, this.environment);
+    const { profilePath } = this.paths(name);
     await rm(profilePath, { force: true });
   }
 }

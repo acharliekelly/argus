@@ -1,4 +1,4 @@
-import { mkdtemp } from 'node:fs/promises';
+import { access, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -57,8 +57,7 @@ describe('connectSite', () => {
       discoverSite,
       createHelper,
       fetch,
-      store,
-      environment: { HOME: home }
+      store
     };
 
     const result = await connectSite(
@@ -134,8 +133,7 @@ describe('connectSite', () => {
           discoverSite: vi.fn().mockResolvedValue(discoveredSite),
           createHelper: vi.fn().mockReturnValue(helper),
           fetch: vi.fn().mockResolvedValue({ ok: true, status: 200 }),
-          store,
-          environment: { HOME: home }
+          store
         }
       )
     ).rejects.toThrow(/wp_db_check failed with exit code 1: database error/);
@@ -154,14 +152,14 @@ describe('connectSite', () => {
     await expect(
       connectSite(
         { name: 'wp-melroseuu', composeFile: '/site/docker-compose.yml', force: false },
-        dependenciesFor({ store, fetch, environment: { HOME: home } })
+        dependenciesFor({ store, fetch })
       )
     ).rejects.toThrow(/already exists/i);
 
     await expect(
       connectSite(
         { name: 'wp-melroseuu', composeFile: '/site/docker-compose.yml', force: true },
-        dependenciesFor({ store, fetch, environment: { HOME: home } })
+        dependenciesFor({ store, fetch })
       )
     ).resolves.toMatchObject({
       profile: { baseUrl: 'http://localhost:8090' }
@@ -169,6 +167,31 @@ describe('connectSite', () => {
     await expect(store.load('wp-melroseuu')).resolves.toMatchObject({
       baseUrl: 'http://localhost:8090'
     });
+  });
+
+  it('uses the injected store as the single source for profile and artifact paths', async () => {
+    const storeHome = await mkdtemp(join(tmpdir(), 'argus-site-connect-store-'));
+    const mismatchedHome = await mkdtemp(join(tmpdir(), 'argus-site-connect-other-'));
+    const store = new SiteStore({ HOME: storeHome });
+    const storePaths = resolveSitePaths('wp-melroseuu', { HOME: storeHome });
+    const mismatchedPaths = resolveSitePaths('wp-melroseuu', { HOME: mismatchedHome });
+    const dependenciesWithIgnoredEnvironment = {
+      ...dependenciesFor({ store }),
+      environment: { HOME: mismatchedHome }
+    };
+
+    const result = await connectSite(
+      { name: 'wp-melroseuu', composeFile: '/site/docker-compose.yml', force: false },
+      dependenciesWithIgnoredEnvironment
+    );
+
+    expect(result.summary.profilePath).toBe(storePaths.profilePath);
+    expect(result.summary.artifactRoot).toBe(storePaths.dataRoot);
+    await expect(store.load('wp-melroseuu')).resolves.toMatchObject({
+      baseUrl: 'http://localhost:8090'
+    });
+    await expect(access(storePaths.dataRoot)).resolves.toBeUndefined();
+    await expect(access(mismatchedPaths.dataRoot)).rejects.toThrow();
   });
 });
 
@@ -187,7 +210,7 @@ function dependenciesFor(
     discoverSite: vi.fn().mockResolvedValue(discoveredSite),
     createHelper: vi.fn().mockReturnValue(fakeHelper()),
     fetch: vi.fn().mockResolvedValue({ ok: true, status: 200 }),
-    store: new SiteStore(overrides.environment),
+    store: new SiteStore(),
     ...overrides
   };
 }
