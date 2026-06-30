@@ -32,7 +32,8 @@ export class DockerSnapshotService {
       await this.helper.runDatabaseClientBuffer([
         'mysqldump',
         '--single-transaction',
-        '--skip-ssl'
+        '--no-tablespaces',
+        '--ssl-mode=DISABLED'
       ]),
       'Export WordPress database'
     );
@@ -76,7 +77,7 @@ export class DockerSnapshotService {
 
     assertCommandPassed(
       await this.helper.runDatabaseClient(
-        ['mysql', '--skip-ssl'],
+        ['mysql', '--ssl-mode=DISABLED'],
         await readFile(databasePath)
       ),
       'Restore WordPress database'
