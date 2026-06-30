@@ -6,12 +6,12 @@ An AI-assisted maintenance system that safely updates WordPress sites by cloning
 
 ## MVP Version
 
-MVP version is CLI tool.
+MVP version is a CLI tool for local Docker Compose WordPress sites.
 
 ### Flow:
 
-- User provides WordPress site info.
-- Agent creates or uses a staging copy.
+- User connects a local Docker Compose WordPress site once and saves it by name.
+- Agent refreshes the live Docker target before each run.
 - Agent records current plugin/theme/core versions.
 - Agent updates one thing at a time.
 - Agent runs Playwright tests.
@@ -65,6 +65,7 @@ Maintenance Orchestrator
 - Playwright for browser automation
 - WP-CLI for WordPress operations
 - Docker Compose for local/staging WordPress
+- Ephemeral Docker helper containers for existing local sites
 - GitHub Actions for CI
 - LLM API for report generation and failure classification
 
@@ -72,6 +73,8 @@ Maintenance Orchestrator
 
 ### Phase 1: Deterministic automation
 
+- save reusable local site profiles
+- discover compatible Docker Compose WordPress targets
 - inventory plugins
 - run updates
 - run Playwright
