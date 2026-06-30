@@ -8,12 +8,15 @@ import type { CommandRecord } from '../types.js';
 
 const WORDPRESS_ROOT = '/var/www/html' as const;
 const UTILITY_IMAGE = 'alpine:3.22' as const;
+const DATABASE_CLIENT_IMAGE = 'mysql:8.0' as const;
 const DEFAULT_HELPER_IMAGE = 'wordpress:cli' as const;
 const WORDPRESS_DATABASE_ENVIRONMENT_KEYS = [
   'WORDPRESS_DB_HOST',
   'WORDPRESS_DB_NAME',
   'WORDPRESS_DB_USER',
-  'WORDPRESS_DB_PASSWORD'
+  'WORDPRESS_DB_PASSWORD',
+  'WORDPRESS_TABLE_PREFIX',
+  'HTTP_HOST'
 ] as const;
 
 type HelperSite = {
@@ -63,6 +66,35 @@ export class DockerSiteHelper {
     }
   }
 
+  async runDatabaseClient(args: string[], input?: Buffer): Promise<CommandRecord> {
+    try {
+      const result = await this.runner.run(
+        'docker',
+        this.databaseClientDockerArgs(args, input !== undefined),
+        input === undefined ? this.databaseRunOptions() : { ...this.databaseRunOptions(), input }
+      );
+      return this.redactRecord(result);
+    } catch (error) {
+      throw this.redactError(error);
+    }
+  }
+
+  async runDatabaseClientBuffer(
+    args: string[],
+    input?: Buffer
+  ): Promise<BinaryCommandResult> {
+    try {
+      const result = await this.runner.runBuffer(
+        'docker',
+        this.databaseClientDockerArgs(args, input !== undefined),
+        input === undefined ? this.databaseRunOptions() : { ...this.databaseRunOptions(), input }
+      );
+      return this.redactBinaryRecord(result);
+    } catch (error) {
+      throw this.redactError(error);
+    }
+  }
+
   private async runText(
     image: string,
     args: string[],
@@ -96,6 +128,25 @@ export class DockerSiteHelper {
     ];
   }
 
+  private databaseClientDockerArgs(args: string[], interactive = false): string[] {
+    const connection = this.databaseConnection();
+    return [
+      'run',
+      '--rm',
+      ...(interactive ? ['--interactive'] : []),
+      '--network',
+      this.networkName,
+      '-e',
+      'MYSQL_PWD',
+      DATABASE_CLIENT_IMAGE,
+      ...args,
+      `--host=${connection.host}`,
+      ...(connection.port === undefined ? [] : [`--port=${connection.port}`]),
+      `--user=${connection.user}`,
+      connection.database
+    ];
+  }
+
   private environmentArgs(): string[] {
     return WORDPRESS_DATABASE_ENVIRONMENT_KEYS.flatMap((name) =>
       this.wordpressEnvironment[name] === undefined ? [] : ['-e', name]
@@ -114,6 +165,43 @@ export class DockerSiteHelper {
         )
       }
     };
+  }
+
+  private databaseRunOptions(): RunOptions {
+    return {
+      env: {
+        ...this.runOptions().env,
+        MYSQL_PWD: this.requiredWordPressEnvironment('WORDPRESS_DB_PASSWORD')
+      }
+    };
+  }
+
+  private databaseConnection(): {
+    host: string;
+    port: string | undefined;
+    user: string;
+    database: string;
+  } {
+    const hostWithOptionalPort = this.requiredWordPressEnvironment('WORDPRESS_DB_HOST');
+    const [host, port] = hostWithOptionalPort.split(':', 2);
+    if (host === undefined || host.length === 0) {
+      throw new Error('WORDPRESS_DB_HOST is required for database client helper');
+    }
+
+    return {
+      host,
+      port: port === undefined || port.length === 0 ? undefined : port,
+      user: this.requiredWordPressEnvironment('WORDPRESS_DB_USER'),
+      database: this.requiredWordPressEnvironment('WORDPRESS_DB_NAME')
+    };
+  }
+
+  private requiredWordPressEnvironment(name: string): string {
+    const value = this.wordpressEnvironment[name];
+    if (value === undefined || value.length === 0) {
+      throw new Error(`${name} is required for database client helper`);
+    }
+    return value;
   }
 
   private redactRecord(result: CommandRecord): CommandRecord {

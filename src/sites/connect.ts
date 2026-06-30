@@ -53,12 +53,15 @@ export async function connectSite(
   const helper = dependencies.createHelper({
     containerId: discovered.containerId,
     networkName: discovered.networkName,
-    wordpressEnvironment: discovered.wordpressEnvironment,
+    wordpressEnvironment: wordpressCliEnvironment(discovered),
     ...(input.helperImage === undefined ? {} : { helperImage: input.helperImage })
   });
 
   assertCommandPassed(await helper.runWp(['core', 'is-installed']), 'wp_core_is_installed');
-  assertCommandPassed(await helper.runWp(['db', 'check', '--skip-ssl']), 'wp_db_check');
+  assertCommandPassed(
+    await helper.runWp(['eval', 'echo $GLOBALS["wpdb"]->get_var("SELECT 1");']),
+    'wp_db_query'
+  );
 
   const response = await dependencies.fetch(discovered.baseUrl);
   if (!response.ok) {
@@ -107,6 +110,13 @@ function discoveryInput(input: ConnectSiteInput): DiscoverSiteInput {
       ? {}
       : { wordpressService: input.wordpressService }),
     ...(input.baseUrl === undefined ? {} : { baseUrl: input.baseUrl })
+  };
+}
+
+function wordpressCliEnvironment(discovered: DiscoveredSite): Record<string, string> {
+  return {
+    ...discovered.wordpressEnvironment,
+    HTTP_HOST: new URL(discovered.baseUrl).host
   };
 }
 

@@ -13,7 +13,9 @@ const site = {
     WORDPRESS_DB_HOST: 'db:3306',
     WORDPRESS_DB_NAME: 'wordpress',
     WORDPRESS_DB_USER: 'wp_user',
-    WORDPRESS_DB_PASSWORD: secretPassword
+    WORDPRESS_DB_PASSWORD: secretPassword,
+    WORDPRESS_TABLE_PREFIX: '3Ge_',
+    HTTP_HOST: 'localhost:8091'
   }
 };
 
@@ -69,6 +71,10 @@ describe('DockerSiteHelper', () => {
         'WORDPRESS_DB_USER',
         '-e',
         'WORDPRESS_DB_PASSWORD',
+        '-e',
+        'WORDPRESS_TABLE_PREFIX',
+        '-e',
+        'HTTP_HOST',
         'wordpress:cli',
         'wp',
         'plugin',
@@ -77,7 +83,9 @@ describe('DockerSiteHelper', () => {
       ],
       {
         env: expect.objectContaining({
-          WORDPRESS_DB_PASSWORD: secretPassword
+          WORDPRESS_DB_PASSWORD: secretPassword,
+          WORDPRESS_TABLE_PREFIX: '3Ge_',
+          HTTP_HOST: 'localhost:8091'
         })
       }
     );
@@ -230,5 +238,83 @@ describe('DockerSiteHelper', () => {
         })
       })
     );
+  });
+
+  it('runs database client commands in a MySQL helper with password in env only', async () => {
+    const run = vi.fn<ProcessRunnerLike['run']>().mockImplementation(async (_command, args) => {
+      return commandResult(args);
+    });
+    const runBuffer = vi.fn<ProcessRunnerLike['runBuffer']>();
+    const helper = new DockerSiteHelper(site, { run, runBuffer });
+
+    await helper.runDatabaseClient(['mysql', '--skip-ssl'], Buffer.from('SELECT 1;'));
+
+    expect(run).toHaveBeenCalledWith(
+      'docker',
+      [
+        'run',
+        '--rm',
+        '--interactive',
+        '--network',
+        'project_default',
+        '-e',
+        'MYSQL_PWD',
+        'mysql:8.0',
+        'mysql',
+        '--skip-ssl',
+        '--host=db',
+        '--port=3306',
+        '--user=wp_user',
+        'wordpress'
+      ],
+      expect.objectContaining({
+        input: Buffer.from('SELECT 1;'),
+        env: expect.objectContaining({
+          MYSQL_PWD: secretPassword
+        })
+      })
+    );
+    expect(JSON.stringify(run.mock.calls[0]?.[1])).not.toContain(secretPassword);
+  });
+
+  it('streams database dumps from the MySQL helper without putting secrets in args', async () => {
+    const run = vi.fn<ProcessRunnerLike['run']>();
+    const runBuffer = vi.fn<ProcessRunnerLike['runBuffer']>(async (_command, args) =>
+      binaryResult(args, Buffer.from('SQL DUMP'))
+    );
+    const helper = new DockerSiteHelper(site, { run, runBuffer });
+
+    const result = await helper.runDatabaseClientBuffer([
+      'mysqldump',
+      '--single-transaction',
+      '--skip-ssl'
+    ]);
+
+    expect(result.stdout).toEqual(Buffer.from('SQL DUMP'));
+    expect(runBuffer).toHaveBeenCalledWith(
+      'docker',
+      expect.arrayContaining([
+        'run',
+        '--rm',
+        '--network',
+        'project_default',
+        '-e',
+        'MYSQL_PWD',
+        'mysql:8.0',
+        'mysqldump',
+        '--single-transaction',
+        '--skip-ssl',
+        '--host=db',
+        '--port=3306',
+        '--user=wp_user',
+        'wordpress'
+      ]),
+      expect.objectContaining({
+        env: expect.objectContaining({
+          MYSQL_PWD: secretPassword
+        })
+      })
+    );
+    expect(JSON.stringify(runBuffer.mock.calls[0]?.[1])).not.toContain(secretPassword);
   });
 });

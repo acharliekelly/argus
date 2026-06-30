@@ -10,6 +10,8 @@ type SnapshotHelper = {
   runWp(args: string[], input?: Buffer): Promise<CommandRecord>;
   runUtility(args: string[], input?: Buffer): Promise<CommandRecord>;
   runUtilityBuffer(args: string[], input?: Buffer): Promise<BinaryCommandResult>;
+  runDatabaseClient(args: string[], input?: Buffer): Promise<CommandRecord>;
+  runDatabaseClientBuffer(args: string[], input?: Buffer): Promise<BinaryCommandResult>;
 };
 
 const DATABASE_SNAPSHOT_PATH = 'snapshot/database.sql' as const;
@@ -26,8 +28,12 @@ export class DockerSnapshotService {
     const contentPath = this.store.runPath(runId, CONTENT_SNAPSHOT_PATH);
     await mkdir(dirname(databasePath), { recursive: true });
 
-    const database = assertCommandPassed(
-      await this.helper.runWp(['db', 'export', '-', '--skip-ssl']),
+    const database = assertBinaryCommandPassed(
+      await this.helper.runDatabaseClientBuffer([
+        'mysqldump',
+        '--single-transaction',
+        '--skip-ssl'
+      ]),
       'Export WordPress database'
     );
     await writeAtomic(databasePath, database.stdout);
@@ -69,7 +75,10 @@ export class DockerSnapshotService {
     );
 
     assertCommandPassed(
-      await this.helper.runWp(['db', 'import', '-', '--skip-ssl'], await readFile(databasePath)),
+      await this.helper.runDatabaseClient(
+        ['mysql', '--skip-ssl'],
+        await readFile(databasePath)
+      ),
       'Restore WordPress database'
     );
   }

@@ -93,7 +93,7 @@ export async function createSiteRuntime(
     containerId: discovered.containerId,
     networkName: discovered.networkName,
     helperImage: profile.helperImage,
-    wordpressEnvironment: discovered.wordpressEnvironment
+    wordpressEnvironment: wordpressCliEnvironment(discovered)
   });
   const wordpress = (
     dependencies.createWordPress ??
@@ -164,5 +164,12 @@ function configFromProfile(
     viewports: profile.viewports,
     secrets: {},
     secretValues: []
+  };
+}
+
+function wordpressCliEnvironment(discovered: DiscoveredSite): Record<string, string> {
+  return {
+    ...discovered.wordpressEnvironment,
+    HTTP_HOST: new URL(discovered.baseUrl).host
   };
 }
