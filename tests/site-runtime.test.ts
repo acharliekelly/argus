@@ -25,7 +25,8 @@ const discoveredSite: DiscoveredSite = {
     WORDPRESS_DB_HOST: 'db:3306',
     WORDPRESS_DB_NAME: 'wordpress',
     WORDPRESS_DB_USER: 'wordpress',
-    WORDPRESS_DB_PASSWORD: 'secret'
+    WORDPRESS_DB_PASSWORD: 'secret',
+    WORDPRESS_TABLE_PREFIX: '3Ge_'
   }
 };
 
@@ -95,7 +96,10 @@ describe('site runtime', () => {
       containerId: 'new-container-id',
       networkName: 'melrose_default',
       helperImage: 'wordpress:cli',
-      wordpressEnvironment: discoveredSite.wordpressEnvironment
+      wordpressEnvironment: {
+        ...discoveredSite.wordpressEnvironment,
+        HTTP_HOST: 'localhost:8090'
+      }
     });
     expect(runtime.store).toBeInstanceOf(RunStore);
     expect(runtime.lock).toBeInstanceOf(RunLock);

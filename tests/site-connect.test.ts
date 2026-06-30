@@ -27,7 +27,8 @@ const discoveredSite: DiscoveredSite = {
     WORDPRESS_DB_HOST: 'db:3306',
     WORDPRESS_DB_NAME: 'wordpress',
     WORDPRESS_DB_USER: 'wordpress',
-    WORDPRESS_DB_PASSWORD: 'secret'
+    WORDPRESS_DB_PASSWORD: 'secret',
+    WORDPRESS_TABLE_PREFIX: '3Ge_'
   }
 };
 
@@ -77,10 +78,16 @@ describe('connectSite', () => {
     expect(createHelper).toHaveBeenCalledWith({
       containerId: 'runtime-container-id',
       networkName: 'site_default',
-      wordpressEnvironment: discoveredSite.wordpressEnvironment
+      wordpressEnvironment: {
+        ...discoveredSite.wordpressEnvironment,
+        HTTP_HOST: 'localhost:8090'
+      }
     });
     expect(helper.runWp).toHaveBeenNthCalledWith(1, ['core', 'is-installed']);
-    expect(helper.runWp).toHaveBeenNthCalledWith(2, ['db', 'check', '--skip-ssl']);
+    expect(helper.runWp).toHaveBeenNthCalledWith(2, [
+      'eval',
+      'echo $GLOBALS["wpdb"]->get_var("SELECT 1");'
+    ]);
     expect(fetch).toHaveBeenCalledWith('http://localhost:8090');
 
     const saved = await store.load('wp-melroseuu');
@@ -121,7 +128,7 @@ describe('connectSite', () => {
     const helper = fakeHelper();
     helper.runWp.mockResolvedValueOnce(commandResult(['wp', 'core', 'is-installed']));
     helper.runWp.mockResolvedValueOnce({
-      ...commandResult(['wp', 'db', 'check', '--skip-ssl']),
+      ...commandResult(['wp', 'eval']),
       exitCode: 1,
       stderr: 'database error'
     });
@@ -136,7 +143,7 @@ describe('connectSite', () => {
           store
         }
       )
-    ).rejects.toThrow(/wp_db_check failed with exit code 1: database error/);
+    ).rejects.toThrow(/wp_db_query failed with exit code 1: database error/);
     await expect(store.load('wp-melroseuu')).rejects.toThrow();
   });
 
@@ -158,7 +165,10 @@ describe('connectSite', () => {
     expect(createHelper).toHaveBeenCalledWith({
       containerId: 'runtime-container-id',
       networkName: 'site_default',
-      wordpressEnvironment: discoveredSite.wordpressEnvironment,
+      wordpressEnvironment: {
+        ...discoveredSite.wordpressEnvironment,
+        HTTP_HOST: 'localhost:8090'
+      },
       helperImage: 'wordpress:cli-php8.3'
     });
   });

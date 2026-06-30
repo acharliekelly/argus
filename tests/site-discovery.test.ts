@@ -51,6 +51,8 @@ describe('discoverSite', () => {
           'WORDPRESS_DB_NAME=wordpress',
           'WORDPRESS_DB_USER=wordpress',
           'WORDPRESS_DB_PASSWORD=secret',
+          'WORDPRESS_TABLE_PREFIX=3Ge_',
+          'WORDPRESS_DEBUG=1',
           'UNRELATED=value'
         ],
         networks: ['project_default', 'proxy'],
@@ -87,7 +89,8 @@ describe('discoverSite', () => {
         WORDPRESS_DB_HOST: 'db:3306',
         WORDPRESS_DB_NAME: 'wordpress',
         WORDPRESS_DB_USER: 'wordpress',
-        WORDPRESS_DB_PASSWORD: 'secret'
+        WORDPRESS_DB_PASSWORD: 'secret',
+        WORDPRESS_TABLE_PREFIX: '3Ge_'
       }
     });
     expect(runner.run).toHaveBeenNthCalledWith(1, 'docker', [

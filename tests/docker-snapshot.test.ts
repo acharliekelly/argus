@@ -33,7 +33,9 @@ function createHelper() {
   return {
     runWp: vi.fn(),
     runUtility: vi.fn(),
-    runUtilityBuffer: vi.fn()
+    runUtilityBuffer: vi.fn(),
+    runDatabaseClient: vi.fn(),
+    runDatabaseClientBuffer: vi.fn()
   };
 }
 
@@ -43,13 +45,17 @@ describe('DockerSnapshotService', () => {
     const store = new RunStore(root);
     await store.createRun('run-1');
     const helper = createHelper();
-    helper.runWp.mockResolvedValueOnce(result('SQL DUMP'));
+    helper.runDatabaseClientBuffer.mockResolvedValueOnce(bufferResult(Buffer.from('SQL DUMP')));
     helper.runUtilityBuffer.mockResolvedValueOnce(bufferResult(Buffer.from('archive')));
     const snapshots = new DockerSnapshotService(helper, store);
 
     const metadata = await snapshots.create('run-1');
 
-    expect(helper.runWp).toHaveBeenCalledWith(['db', 'export', '-', '--skip-ssl']);
+    expect(helper.runDatabaseClientBuffer).toHaveBeenCalledWith([
+      'mysqldump',
+      '--single-transaction',
+      '--skip-ssl'
+    ]);
     expect(helper.runUtilityBuffer).toHaveBeenCalledWith([
       'tar',
       '-czf',
@@ -58,7 +64,7 @@ describe('DockerSnapshotService', () => {
       '/var/www/html',
       'wp-content'
     ]);
-    expect(JSON.stringify(helper.runWp.mock.calls)).not.toContain('/argus');
+    expect(JSON.stringify(helper.runDatabaseClientBuffer.mock.calls)).not.toContain('/argus');
     expect(JSON.stringify(helper.runUtilityBuffer.mock.calls)).not.toContain('/argus');
     await expect(readFile(store.runPath('run-1', 'snapshot/database.sql'), 'utf8')).resolves.toBe(
       'SQL DUMP'
@@ -86,7 +92,7 @@ describe('DockerSnapshotService', () => {
     const helper = createHelper();
     helper.runUtility.mockResolvedValue(result(''));
     helper.runUtilityBuffer.mockResolvedValue(bufferResult(Buffer.from('')));
-    helper.runWp.mockResolvedValueOnce(result(''));
+    helper.runDatabaseClient.mockResolvedValueOnce(result(''));
     const snapshots = new DockerSnapshotService(helper, store);
 
     await snapshots.restore('run-1', {
@@ -104,19 +110,19 @@ describe('DockerSnapshotService', () => {
       ['tar', '-xzf', '-', '-C', '/var/www/html'],
       Buffer.from('archive')
     );
-    expect(helper.runWp).toHaveBeenNthCalledWith(
+    expect(helper.runDatabaseClient).toHaveBeenNthCalledWith(
       1,
-      ['db', 'import', '-', '--skip-ssl'],
+      ['mysql', '--skip-ssl'],
       Buffer.from('SELECT 1;')
     );
     expect(helper.runUtility).toHaveBeenCalledTimes(1);
     expect(helper.runUtilityBuffer).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(helper.runUtility.mock.calls)).not.toContain('mariadb');
-    expect(JSON.stringify(helper.runWp.mock.calls)).not.toContain('WORDPRESS_DB_PASSWORD');
+    expect(JSON.stringify(helper.runDatabaseClient.mock.calls)).not.toContain('WORDPRESS_DB_PASSWORD');
     expect(JSON.stringify(helper.runUtility.mock.calls)).not.toContain('super-secret');
-    expect(JSON.stringify(helper.runWp.mock.calls)).not.toContain('super-secret');
+    expect(JSON.stringify(helper.runDatabaseClient.mock.calls)).not.toContain('super-secret');
     expect(JSON.stringify(helper.runUtility.mock.calls)).not.toContain('/argus');
-    expect(JSON.stringify(helper.runWp.mock.calls)).not.toContain('/argus');
+    expect(JSON.stringify(helper.runDatabaseClient.mock.calls)).not.toContain('/argus');
   });
 
   it('does not call alpine mariadb when restoring a database snapshot', async () => {
@@ -129,7 +135,7 @@ describe('DockerSnapshotService', () => {
     const helper = createHelper();
     helper.runUtility.mockResolvedValue(result(''));
     helper.runUtilityBuffer.mockResolvedValue(bufferResult(Buffer.from('')));
-    helper.runWp.mockResolvedValue(result(''));
+    helper.runDatabaseClient.mockResolvedValue(result(''));
     const snapshots = new DockerSnapshotService(helper, store);
 
     await snapshots.restore('run-1', {
@@ -141,8 +147,9 @@ describe('DockerSnapshotService', () => {
     expect(helper.runUtility).toHaveBeenCalledTimes(1);
     expect(helper.runUtilityBuffer).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(helper.runUtility.mock.calls)).not.toContain('mariadb');
-    expect(helper.runWp).toHaveBeenCalledWith(
-      ['db', 'import', '-', '--skip-ssl'],
+    expect(JSON.stringify(helper.runDatabaseClient.mock.calls)).not.toContain('mariadb');
+    expect(helper.runDatabaseClient).toHaveBeenCalledWith(
+      ['mysql', '--skip-ssl'],
       Buffer.from('SELECT 1;')
     );
   });
