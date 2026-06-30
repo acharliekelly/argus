@@ -247,7 +247,7 @@ describe('DockerSiteHelper', () => {
     const runBuffer = vi.fn<ProcessRunnerLike['runBuffer']>();
     const helper = new DockerSiteHelper(site, { run, runBuffer });
 
-    await helper.runDatabaseClient(['mysql', '--skip-ssl'], Buffer.from('SELECT 1;'));
+    await helper.runDatabaseClient(['mysql', '--ssl-mode=DISABLED'], Buffer.from('SELECT 1;'));
 
     expect(run).toHaveBeenCalledWith(
       'docker',
@@ -261,7 +261,7 @@ describe('DockerSiteHelper', () => {
         'MYSQL_PWD',
         'mysql:8.0',
         'mysql',
-        '--skip-ssl',
+        '--ssl-mode=DISABLED',
         '--host=db',
         '--port=3306',
         '--user=wp_user',
@@ -287,7 +287,8 @@ describe('DockerSiteHelper', () => {
     const result = await helper.runDatabaseClientBuffer([
       'mysqldump',
       '--single-transaction',
-      '--skip-ssl'
+      '--no-tablespaces',
+      '--ssl-mode=DISABLED'
     ]);
 
     expect(result.stdout).toEqual(Buffer.from('SQL DUMP'));
@@ -303,7 +304,8 @@ describe('DockerSiteHelper', () => {
         'mysql:8.0',
         'mysqldump',
         '--single-transaction',
-        '--skip-ssl',
+        '--no-tablespaces',
+        '--ssl-mode=DISABLED',
         '--host=db',
         '--port=3306',
         '--user=wp_user',

@@ -54,7 +54,8 @@ describe('DockerSnapshotService', () => {
     expect(helper.runDatabaseClientBuffer).toHaveBeenCalledWith([
       'mysqldump',
       '--single-transaction',
-      '--skip-ssl'
+      '--no-tablespaces',
+      '--ssl-mode=DISABLED'
     ]);
     expect(helper.runUtilityBuffer).toHaveBeenCalledWith([
       'tar',
@@ -112,7 +113,7 @@ describe('DockerSnapshotService', () => {
     );
     expect(helper.runDatabaseClient).toHaveBeenNthCalledWith(
       1,
-      ['mysql', '--skip-ssl'],
+      ['mysql', '--ssl-mode=DISABLED'],
       Buffer.from('SELECT 1;')
     );
     expect(helper.runUtility).toHaveBeenCalledTimes(1);
@@ -149,7 +150,7 @@ describe('DockerSnapshotService', () => {
     expect(JSON.stringify(helper.runUtility.mock.calls)).not.toContain('mariadb');
     expect(JSON.stringify(helper.runDatabaseClient.mock.calls)).not.toContain('mariadb');
     expect(helper.runDatabaseClient).toHaveBeenCalledWith(
-      ['mysql', '--skip-ssl'],
+      ['mysql', '--ssl-mode=DISABLED'],
       Buffer.from('SELECT 1;')
     );
   });
